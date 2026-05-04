@@ -43,12 +43,12 @@ fn try_protector(ctx: TracePointContext) -> Result<u32, i64> {
         filename: [0u8; FILENAME_LEN],
     };
 
-    unsafe { bpf_get_current_comm(&mut event.comm) }.map_err(|e| e as i64)?;
+    event.comm = bpf_get_current_comm().map_err(|e| e as i64)?;
     unsafe { bpf_probe_read_user_str_bytes(filename_ptr as *const u8, &mut event.filename) }
         .map_err(|e| e as i64)?;
 
     // output() does a single copy into the ring buffer — no reserve/submit needed
-    RING_BUF.output(&event, 0).ok();
+    RING_BUF.output::<ExecEvent>(&event, 0).ok();
 
     Ok(0)
 }
