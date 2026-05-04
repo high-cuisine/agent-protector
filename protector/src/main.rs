@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let tool_db = Arc::new(ToolDb::default());
     let tracker = Arc::new(Mutex::new(ProcessTracker::new()));
 
-    info!("Protector started — monitoring Claude Code agent actions");
+    info!("Protector started — monitoring Claude Code agent actions (RUST_LOG=debug for skip reasons)");
 
     loop {
         tokio::select! {
@@ -87,6 +87,10 @@ fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTrack
 
     // Fast pre-filter: skip binaries we'd never watch
     if !looks_interesting(filename) {
+        debug!(
+            "skip pid={} file={} comm={} reason=not_in_tool_watchlist",
+            event.pid, filename, comm
+        );
         return;
     }
 
@@ -96,16 +100,28 @@ fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTrack
     };
 
     if !is_agent_child {
+        debug!(
+            "skip pid={} file={} comm={} reason=not_descendant_of_claude_roots",
+            event.pid, filename, comm
+        );
         return;
     }
 
     // Read full argv from /proc before the process disappears
     let Some(args) = read_cmdline(event.pid) else {
+        debug!(
+            "skip pid={} file={} comm={} reason=no_cmdline_in_proc",
+            event.pid, filename, comm
+        );
         return;
     };
     let cwd = read_cwd(event.pid);
 
     let Some(action) = tool_db.find_action(filename, &args) else {
+        debug!(
+            "skip pid={} file={} comm={} args={:?} reason=no_matching_tool_rule (only git-commit is implemented)",
+            event.pid, filename, comm, args
+        );
         return;
     };
 

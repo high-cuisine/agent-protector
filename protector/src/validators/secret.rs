@@ -33,6 +33,8 @@ impl Default for SecretScanner {
             ("JWT Token",                 r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
             ("Generic API Key",           r#"(?i)(api[_\-]?key|apikey)\s*[=:]\s*['"]?[A-Za-z0-9/_\-]{20,}"#),
             ("Generic Secret/Password",   r#"(?i)(secret|password|passwd|pwd|token)\s*[=:]\s*['"]\S{8,}['"]"#),
+            /// Same as quoted form, but many configs/tools use bare values (INI, env snippets).
+            ("Generic Secret (unquoted)", r"(?i)\b(secret|password|passwd|pwd|token)\s*=\s*\S{8,}"),
             ("High-entropy hex string",   r"\b[0-9a-f]{32,}\b"),
         ];
 

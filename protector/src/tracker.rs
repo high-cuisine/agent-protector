@@ -8,6 +8,8 @@ pub struct ProcessTracker {
     /// PIDs we've identified as Claude Code instances
     claude_pids: HashSet<u32>,
     last_claude_refresh: Instant,
+    /// Last snapshot we logged at `info` (avoid spamming every refresh)
+    last_logged_claude_snapshot: Option<Vec<u32>>,
 }
 
 impl ProcessTracker {
@@ -16,9 +18,17 @@ impl ProcessTracker {
             ppid_cache: HashMap::new(),
             claude_pids: HashSet::new(),
             last_claude_refresh: Instant::now() - Duration::from_secs(60),
+            last_logged_claude_snapshot: None,
         };
         tracker.refresh_claude_pids();
         tracker
+    }
+
+    /// Root PIDs we treat as Claude/Code (sorted). Descendants of these are validated.
+    pub fn claude_root_pids(&self) -> Vec<u32> {
+        let mut pids: Vec<u32> = self.claude_pids.iter().copied().collect();
+        pids.sort_unstable();
+        pids
     }
 
     /// Returns true if `pid` is a descendant of a Claude Code process.
@@ -76,16 +86,41 @@ impl ProcessTracker {
             }
         }
 
-        if !self.claude_pids.is_empty() {
-            log::debug!("Tracking Claude PIDs: {:?}", self.claude_pids);
+        let mut sorted: Vec<u32> = self.claude_pids.iter().copied().collect();
+        sorted.sort_unstable();
+        if self.last_logged_claude_snapshot.as_ref() != Some(&sorted) {
+            self.last_logged_claude_snapshot = Some(sorted.clone());
+            if sorted.is_empty() {
+                log::warn!(
+                    "No Claude/Code root processes found in /proc — only descendants of detected roots are monitored. \
+                     Run Claude Code on this host (or use RUST_LOG=debug to see every exec we skip)."
+                );
+            } else {
+                log::info!(
+                    "Claude/Code root PIDs (watching descendants): {:?}",
+                    sorted
+                );
+            }
+        } else {
+            log::debug!("Claude/Code root PIDs unchanged: {:?}", sorted);
         }
     }
+}
+
+fn cmdline_indicates_claude(cmdline_str: &str) -> bool {
+    let lower = cmdline_str.to_ascii_lowercase();
+    lower.contains("claude")
+        || lower.contains("claude-code")
+        || lower.contains("@anthropic-ai/claude")
+        || lower.contains("anthropic-ai/claude")
+        || lower.contains("/.claude/")
+        || lower.contains("claude code")
 }
 
 fn is_claude_process(pid: u32) -> bool {
     // Check the comm name (first 15 chars of argv[0])
     if let Ok(comm) = fs::read_to_string(format!("/proc/{}/comm", pid)) {
-        let comm = comm.trim();
+        let comm = comm.trim().to_ascii_lowercase();
         if comm == "claude" || comm.starts_with("claude") {
             return true;
         }
@@ -98,7 +133,7 @@ fn is_claude_process(pid: u32) -> bool {
             .map(|s| String::from_utf8_lossy(s).into_owned())
             .collect::<Vec<_>>()
             .join(" ");
-        if cmdline_str.contains("claude") {
+        if cmdline_indicates_claude(&cmdline_str) {
             return true;
         }
     }
