@@ -443,3 +443,4 @@ fn snippet(s: &str, max_chars: usize) -> String {
         format!("{}...", s.chars().take(max_chars).collect::<String>())
     }
 }
+
