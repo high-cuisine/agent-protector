@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 use tokio::io::unix::AsyncFd;
 use tokio::signal;
 
+mod banner;
+mod errors;
 mod tool_db;
 mod tracker;
 mod validator;
@@ -17,8 +19,23 @@ use tool_db::ToolDb;
 use tracker::ProcessTracker;
 use validator::{ValidationContext, ValidationResult};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() {
+    // Print banner before the async runtime starts so it always appears,
+    // even if eBPF loading fails immediately afterwards.
+    banner::print_banner();
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(async_main())
+        .unwrap_or_else(|e| {
+            eprintln!("fatal: {e:#}");
+            std::process::exit(1);
+        });
+}
+
+async fn async_main() -> anyhow::Result<()> {
     env_logger::init();
 
     // Required for older kernels without memcg-based eBPF memory accounting
@@ -145,19 +162,19 @@ fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTrack
             info!("[{}] ALLOWED — resuming pid={}", action.name, event.pid);
             send_signal(event.pid, libc::SIGCONT);
         }
-        ValidationResult::Warn { reason } => {
+        ValidationResult::Warn(threat) => {
             warn!(
-                "[{}] WARNING pid={} — {}\nResuming.",
-                action.name, event.pid, reason
+                "[{}] WARNING pid={} [{}]\n{}",
+                action.name, event.pid, threat.code(), threat
             );
             send_signal(event.pid, libc::SIGCONT);
         }
-        ValidationResult::Block { reason } => {
+        ValidationResult::Block(threat) => {
             warn!(
-                "[{}] BLOCKED pid={} — {}",
-                action.name, event.pid, reason
+                "[{}] BLOCKED pid={} [{}]\n{}",
+                action.name, event.pid, threat.code(), threat
             );
-            // SIGKILL first, SIGCONT so the process can actually receive SIGKILL
+            // SIGKILL first so the process exits, SIGCONT so it can receive the signal
             send_signal(event.pid, libc::SIGKILL);
             send_signal(event.pid, libc::SIGCONT);
         }
@@ -166,11 +183,21 @@ fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTrack
 
 /// Quick pre-filter: only pass events that could match something in ToolDb.
 fn looks_interesting(filename: &str) -> bool {
-    const WATCHED: &[&str] = &["git", "npm", "pip3", "pip", "curl", "wget", "docker", "kubectl"];
-    WATCHED.iter().any(|w| {
-        filename == *w
-            || filename.ends_with(&format!("/{}", w))
-    })
+    const WATCHED: &[&str] = &[
+        // VCS
+        "git",
+        // SQL databases
+        "psql", "mysql", "mariadb", "sqlite3",
+        // Key-value / cache
+        "redis-cli",
+        // Package managers (future rules)
+        "npm", "pip", "pip3",
+        // Network / container (future rules)
+        "curl", "wget", "docker", "kubectl",
+    ];
+    WATCHED
+        .iter()
+        .any(|w| filename == *w || filename.ends_with(&format!("/{}", w)))
 }
 
 fn send_signal(pid: u32, sig: libc::c_int) {

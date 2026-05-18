@@ -4,8 +4,9 @@ members = [
     "protector",
     "protector-common",
     "protector-ebpf",
+    "proxy-injector",
 ]
-default-members = ["protector", "protector-common"]
+default-members = ["protector", "protector-common", "proxy-injector"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

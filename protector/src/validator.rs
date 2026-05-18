@@ -1,3 +1,4 @@
+use crate::errors::ThreatError;
 use std::path::PathBuf;
 
 pub struct ValidationContext {
@@ -9,8 +10,10 @@ pub struct ValidationContext {
 
 pub enum ValidationResult {
     Allow,
-    Block { reason: String },
-    Warn { reason: String },
+    /// The action is blocked and the agent receives a typed threat description.
+    Block(ThreatError),
+    /// The action is allowed but the agent is warned about the threat.
+    Warn(ThreatError),
 }
 
 pub trait Validator: Send + Sync {

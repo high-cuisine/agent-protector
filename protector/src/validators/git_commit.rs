@@ -1,6 +1,7 @@
+use crate::errors::{SecretHit, ThreatError};
 use crate::validator::{ValidationContext, ValidationResult, Validator};
 use crate::validators::secret::SecretScanner;
-use log::{info, warn};
+use log::info;
 use std::path::Path;
 use std::process::Command;
 
@@ -13,12 +14,10 @@ impl GitCommitValidator {
         Self { scanner }
     }
 
-    /// Returns the list of file paths staged for commit.
     fn staged_files(cwd: &Path) -> Vec<String> {
         let out = Command::new("git")
             .args(["-C", &cwd.to_string_lossy(), "diff", "--cached", "--name-only"])
             .output();
-
         match out {
             Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
                 .lines()
@@ -29,13 +28,11 @@ impl GitCommitValidator {
         }
     }
 
-    /// Returns staged content of a file (from the index, not the working tree).
     fn staged_content(cwd: &Path, file: &str) -> Option<String> {
         let out = Command::new("git")
             .args(["-C", &cwd.to_string_lossy(), "show", &format!(":{}", file)])
             .output()
             .ok()?;
-
         if out.status.success() {
             String::from_utf8(out.stdout).ok()
         } else {
@@ -63,33 +60,26 @@ impl Validator for GitCommitValidator {
             cwd
         );
 
-        let mut violations: Vec<String> = Vec::new();
+        let mut hits: Vec<SecretHit> = Vec::new();
 
         for file in &files {
-            // Use staged index content so we scan exactly what's going in
             if let Some(content) = Self::staged_content(&cwd, file) {
                 for m in self.scanner.scan_content(&content) {
-                    let msg = format!(
-                        "{}:{} [{}] — {}",
-                        file, m.line_number, m.pattern_name, m.snippet
-                    );
-                    warn!("[git-commit] secret detected: {}", msg);
-                    violations.push(msg);
+                    hits.push(SecretHit {
+                        file: file.clone(),
+                        line: m.line_number,
+                        kind: m.pattern_name,
+                        snippet: m.snippet,
+                    });
                 }
             }
         }
 
-        if violations.is_empty() {
+        if hits.is_empty() {
             info!("[git-commit] validation passed");
             ValidationResult::Allow
         } else {
-            ValidationResult::Block {
-                reason: format!(
-                    "Potential secrets detected in staged files ({} hit(s)):\n  {}",
-                    violations.len(),
-                    violations.join("\n  ")
-                ),
-            }
+            ValidationResult::Block(ThreatError::SecretLeak { hits })
         }
     }
 }
