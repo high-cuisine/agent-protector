@@ -4,17 +4,17 @@ use log::{debug, info, warn};
 use regex::Regex;
 use std::path::PathBuf;
 
-// ─── SQL source ──────────────────────────────────────────────────────────────
+// -- SQL source ---------------------------------------------------------------
 
 enum SqlSource {
     Inline(String),
     File(PathBuf),
 }
 
-// ─── Threat category for block-level patterns ─────────────────────────────────
+// -- Threat category for block-level patterns ---------------------------------
 
 #[derive(Copy, Clone)]
-enum SqlCategory {
+pub(crate) enum SqlCategory {
     Destructive,
     PrivilegeEscalation,
     FilesystemAccess,
@@ -22,7 +22,7 @@ enum SqlCategory {
     Injection,
 }
 
-// ─── Pattern engine ──────────────────────────────────────────────────────────
+// -- Pattern engine -----------------------------------------------------------
 
 struct NamedPattern {
     name: &'static str,
@@ -58,14 +58,14 @@ impl Default for SqlAnalyzer {
                     name: $name,
                     re: re($pat),
                     block: false,
-                    category: SqlCategory::Injection, // unused for warn
+                    category: SqlCategory::Injection,
                 }
             };
         }
 
         use SqlCategory::*;
         let patterns = vec![
-            // ── BLOCK: DDL — object destruction ──────────────────────────────
+            // BLOCK: DDL - object destruction
             block!(Destructive, "DROP TABLE",
                 r"(?i)\bDROP\s+TABLE\b"),
             block!(Destructive, "DROP DATABASE / SCHEMA",
@@ -77,7 +77,7 @@ impl Default for SqlAnalyzer {
             block!(Destructive, "ALTER TABLE DROP COLUMN",
                 r"(?i)\bALTER\s+TABLE\b.{0,500}\bDROP\s+COLUMN\b"),
 
-            // ── BLOCK: Privilege escalation ───────────────────────────────────
+            // BLOCK: Privilege escalation
             block!(PrivilegeEscalation, "GRANT privileges",
                 r"(?i)\bGRANT\s+\w"),
             block!(PrivilegeEscalation, "REVOKE privileges",
@@ -85,67 +85,70 @@ impl Default for SqlAnalyzer {
             block!(PrivilegeEscalation, "CREATE / ALTER USER or ROLE",
                 r"(?i)\b(CREATE|ALTER)\s+(USER|ROLE)\b"),
 
-            // ── BLOCK: Filesystem access via SQL ──────────────────────────────
-            block!(FilesystemAccess, "MySQL SELECT INTO OUTFILE (file write)",
+            // BLOCK: Filesystem access via SQL
+            block!(FilesystemAccess, "MySQL SELECT INTO OUTFILE",
                 r"(?i)\bINTO\s+OUTFILE\b"),
-            block!(FilesystemAccess, "MySQL LOAD DATA INFILE (file read)",
+            block!(FilesystemAccess, "MySQL LOAD DATA INFILE",
                 r"(?i)\bLOAD\s+DATA\s+(LOCAL\s+)?INFILE\b"),
             block!(FilesystemAccess, "PostgreSQL COPY TO/FROM filesystem",
                 r"(?i)\bCOPY\b[^;]{0,400}\b(TO|FROM)\s+['\"/]"),
-            block!(FilesystemAccess,
-                "PostgreSQL pg_read_file / pg_ls_dir / pg_stat_file",
+            block!(FilesystemAccess, "PostgreSQL pg_read_file / pg_ls_dir / pg_stat_file",
                 r"(?i)\bPG_(READ_FILE|LS_DIR|STAT_FILE)\s*\("),
             block!(FilesystemAccess, "PostgreSQL pg_execute_server_program",
                 r"(?i)\bPG_EXECUTE_SERVER_PROGRAM\s*\("),
-            block!(FilesystemAccess,
-                "PostgreSQL lo_export / lo_import (large object file I/O)",
+            block!(FilesystemAccess, "PostgreSQL lo_export / lo_import",
                 r"(?i)\bLO_(EXPORT|IMPORT)\s*\("),
 
-            // ── BLOCK: Remote code / OS command execution ─────────────────────
-            block!(RemoteExec, "MSSQL xp_cmdshell (OS command execution)",
+            // BLOCK: Remote code / OS command execution
+            block!(RemoteExec, "MSSQL xp_cmdshell",
                 r"(?i)\bXP_CMDSHELL\s*\("),
             block!(RemoteExec, "MSSQL OPENROWSET / OPENDATASOURCE",
                 r"(?i)\b(OPENROWSET|OPENDATASOURCE)\s*\("),
-            block!(RemoteExec, "MSSQL sp_configure (server reconfiguration)",
+            block!(RemoteExec, "MSSQL sp_configure",
                 r"(?i)\bSP_CONFIGURE\b"),
             block!(RemoteExec, "MSSQL sp_addlogin / sp_addsrvrolemember",
                 r"(?i)\bSP_(ADDLOGIN|ADDSRVROLEMEMBER|GRANTDBACCESS)\b"),
 
-            // ── BLOCK: SQL injection signatures ──────────────────────────────
-            block!(Injection, "UNION SELECT (data exfiltration / injection)",
+            // BLOCK: SQL injection signatures
+            block!(Injection, "UNION SELECT",
                 r"(?i)\bUNION\s+(ALL\s+)?SELECT\b"),
-            block!(Injection,
-                "Stacked query — DDL/DML injected after semicolon",
+            block!(Injection, "Stacked query - DDL/DML after semicolon",
                 r"(?i);\s*(DROP|TRUNCATE|DELETE\s+FROM|INSERT\s+INTO|UPDATE\s+\w[\w.]*\s+SET|CREATE\s+(TABLE|DATABASE|USER)|ALTER\s+(TABLE|USER)|GRANT|EXEC(UTE)?)\b"),
-            block!(Injection, "Dynamic EXEC with variable (stored-proc injection)",
+            block!(Injection, "Dynamic EXEC with variable",
                 r"(?i)\bEXEC(UTE)?\s*\(\s*@"),
 
-            // ── WARN: Schema reconnaissance ───────────────────────────────────
-            warn_pat!("System schema access (information_schema / pg_catalog / sys.)",
+            // WARN: Schema reconnaissance
+            warn_pat!("System schema access (information_schema / pg_catalog)",
                 r"(?i)\b(INFORMATION_SCHEMA|PG_CATALOG)\b|(?i)\bSYS\."),
             warn_pat!("SHOW DATABASES / TABLES / GRANTS / PROCESSLIST",
                 r"(?i)\bSHOW\s+(DATABASES|TABLES|GRANTS|USERS|PROCESSLIST|VARIABLES|STATUS)\b"),
-            warn_pat!("psql \\d schema introspection meta-command",
+            warn_pat!("psql schema introspection meta-command",
                 r"(?i)\\d[tfvisScCnpuFDE]?\b"),
             warn_pat!("MySQL / MariaDB DESCRIBE / EXPLAIN",
                 r"(?i)\b(DESCRIBE|EXPLAIN)\s+\w"),
-            warn_pat!("ALTER TABLE (schema modification — verify intent)",
+
+            // WARN: Risky schema modification
+            warn_pat!("ALTER TABLE - schema modification",
                 r"(?i)\bALTER\s+TABLE\b"),
-            warn_pat!(
-                "DROP INDEX / VIEW / SEQUENCE / FUNCTION / PROCEDURE / TRIGGER",
+            warn_pat!("DROP INDEX / VIEW / SEQUENCE / FUNCTION / PROCEDURE / TRIGGER",
                 r"(?i)\bDROP\s+(INDEX|VIEW|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER)\b"),
-            warn_pat!("INSERT … SELECT (mass data copy / potential exfiltration)",
+
+            // WARN: Bulk data operations
+            warn_pat!("INSERT ... SELECT - mass data copy",
                 r"(?i)\bINSERT\s+(INTO\s+)?\w[\w.]*\s+SELECT\b"),
             warn_pat!("SELECT * from sensitive-sounding table",
                 r"(?i)\bSELECT\s+\*\s+FROM\s+\w*(user|account|cred|token|secret|password|auth|api_?key|session)\w*\b"),
-            warn_pat!(
-                "Time-based injection function (pg_sleep / SLEEP / BENCHMARK)",
+
+            // WARN: Time-based injection indicators
+            warn_pat!("Time-based injection (pg_sleep / SLEEP / BENCHMARK)",
                 r"(?i)\b(PG_SLEEP|SLEEP|BENCHMARK)\s*\("),
-            warn_pat!("WAITFOR DELAY (MSSQL time-based injection)",
+            warn_pat!("WAITFOR DELAY - MSSQL time-based injection",
                 r"(?i)\bWAITFOR\s+DELAY\b"),
-            warn_pat!("OR 1=1 / OR 'x'='x' tautology (classic injection)",
+
+            // WARN: Classic injection tautologies
+            warn_pat!("OR 1=1 tautology",
                 r#"(?i)\bOR\s+(\d+\s*=\s*\d+|'[^']*'\s*=\s*'[^']*')"#),
-            warn_pat!("Comment-based injection (--  or /**/ used to suppress tail)",
+            warn_pat!("Comment-based injection",
                 r"(?i)'.{0,60}(--|/\*)"),
         ];
 
@@ -160,7 +163,8 @@ impl Default for SqlAnalyzer {
     }
 }
 
-/// A classified finding from a block-level pattern or implicit rule.
+// -- Classified finding -------------------------------------------------------
+
 pub(crate) struct CategorizedFinding {
     pub(crate) category: SqlCategory,
     pub(crate) detail: String,
@@ -180,13 +184,11 @@ impl SqlAnalyzer {
         warns: &mut Vec<String>,
     ) {
         let stmt = stmt.trim();
-        if stmt.is_empty() {
-            return;
-        }
+        if stmt.is_empty() { return; }
 
         for pat in &self.patterns {
             if pat.re.is_match(stmt) {
-                let detail = format!("{} — `{}`", pat.name, snippet(stmt, 100));
+                let detail = format!("{} -- `{}`", pat.name, snippet(stmt, 100));
                 if pat.block {
                     blocks.push(CategorizedFinding { category: pat.category, detail });
                 } else {
@@ -199,7 +201,7 @@ impl SqlAnalyzer {
             blocks.push(CategorizedFinding {
                 category: SqlCategory::Destructive,
                 detail: format!(
-                    "DELETE FROM without WHERE clause (would delete every row) — `{}`",
+                    "DELETE FROM without WHERE (would delete every row) -- `{}`",
                     snippet(stmt, 100)
                 ),
             });
@@ -209,7 +211,7 @@ impl SqlAnalyzer {
             blocks.push(CategorizedFinding {
                 category: SqlCategory::Destructive,
                 detail: format!(
-                    "UPDATE without WHERE clause (would update every row) — `{}`",
+                    "UPDATE without WHERE (would update every row) -- `{}`",
                     snippet(stmt, 100)
                 ),
             });
@@ -243,7 +245,7 @@ pub enum SqlAnalysis {
     Dangerous(Vec<CategorizedFinding>),
 }
 
-// ─── Validator ───────────────────────────────────────────────────────────────
+// -- Validator ----------------------------------------------------------------
 
 pub struct SqlGuardValidator {
     tool_label: &'static str,
@@ -327,7 +329,7 @@ impl Validator for SqlGuardValidator {
             Some(s) => s,
             None => {
                 debug!(
-                    "[{}] pid={} no inline SQL in args — stdin queries not intercepted at execve",
+                    "[{}] pid={} no inline SQL in args",
                     self.tool_label, ctx.pid
                 );
                 return ValidationResult::Allow;
@@ -377,13 +379,16 @@ impl Validator for SqlGuardValidator {
     }
 }
 
-/// Public re-export for kubectl_guard (same logic, pub(crate) visibility).
-pub(crate) fn build_sql_threat_pub(tool: &'static str, findings: Vec<CategorizedFinding>) -> ThreatError {
+// -- pub(crate) helper for kubectl_guard --------------------------------------
+
+pub(crate) fn build_sql_threat_pub(
+    tool: &'static str,
+    findings: Vec<CategorizedFinding>,
+) -> ThreatError {
     build_sql_threat(tool, findings)
 }
 
-/// Group categorized findings into the most specific `ThreatError` variant.
-/// When multiple categories fire in one query, we pick the highest-severity one.
+/// Group categorized findings into the most specific ThreatError variant.
 /// Priority: RemoteExec > Injection > PrivilegeEscalation > FilesystemAccess > Destructive.
 fn build_sql_threat(tool: &'static str, findings: Vec<CategorizedFinding>) -> ThreatError {
     let mut destructive: Vec<String> = vec![];
@@ -394,11 +399,11 @@ fn build_sql_threat(tool: &'static str, findings: Vec<CategorizedFinding>) -> Th
 
     for f in findings {
         match f.category {
-            SqlCategory::Destructive        => destructive.push(f.detail),
+            SqlCategory::Destructive         => destructive.push(f.detail),
             SqlCategory::PrivilegeEscalation => priv_esc.push(f.detail),
-            SqlCategory::FilesystemAccess   => filesystem.push(f.detail),
-            SqlCategory::RemoteExec         => remote_exec.push(f.detail),
-            SqlCategory::Injection          => injection.push(f.detail),
+            SqlCategory::FilesystemAccess    => filesystem.push(f.detail),
+            SqlCategory::RemoteExec          => remote_exec.push(f.detail),
+            SqlCategory::Injection           => injection.push(f.detail),
         }
     }
 
@@ -415,14 +420,14 @@ fn build_sql_threat(tool: &'static str, findings: Vec<CategorizedFinding>) -> Th
     }
 }
 
-// ─── Helpers used by kubectl_guard ───────────────────────────────────────────
+// -- Helpers used by kubectl_guard --------------------------------------------
 
 pub(crate) fn extract_sql_for_tool(tool: &str, args: &[String]) -> Option<String> {
     let validator = match tool {
-        "psql"            => SqlGuardValidator::psql(),
+        "psql"              => SqlGuardValidator::psql(),
         "mysql" | "mariadb" => SqlGuardValidator::mysql(),
-        "sqlite3"         => SqlGuardValidator::sqlite3(),
-        _                 => return None,
+        "sqlite3"           => SqlGuardValidator::sqlite3(),
+        _                   => return None,
     };
     match validator.extract_sql(args)? {
         SqlSource::Inline(s)  => Some(s),
@@ -435,6 +440,6 @@ fn snippet(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()
     } else {
-        format!("{}…", s.chars().take(max_chars).collect::<String>())
+        format!("{}...", s.chars().take(max_chars).collect::<String>())
     }
 }
