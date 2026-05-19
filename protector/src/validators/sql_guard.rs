@@ -149,7 +149,7 @@ impl Default for SqlAnalyzer {
             warn_pat!("OR 1=1 tautology",
                 r#"(?i)\bOR\s+(\d+\s*=\s*\d+|'[^']*'\s*=\s*'[^']*')"#),
             warn_pat!("Comment-based injection",
-                r#"(?i)'.{0,60}(--|/\*)"#),
+                "(?i)'.{0,60}(--|/\\*)"),
         ];
 
         Self {
