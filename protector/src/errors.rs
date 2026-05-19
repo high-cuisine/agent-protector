@@ -11,6 +11,11 @@ pub enum ThreatError {
         hits: Vec<SecretHit>,
     },
 
+    /// `git diff --cached` / listing staged files failed — protector cannot audit the commit safely.
+    GitCommitInspectionFailed {
+        detail: String,
+    },
+
     // ── SQL: destructive DDL / DML ────────────────────────────────────────────
     /// DROP, TRUNCATE, DELETE/UPDATE without WHERE, ALTER TABLE DROP COLUMN.
     SqlDestructive {
@@ -155,6 +160,7 @@ impl ThreatError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::SecretLeak { .. }             => "SECRET_LEAK",
+            Self::GitCommitInspectionFailed { .. } => "GIT_COMMIT_INSPECT_FAILED",
             Self::SqlDestructive { .. }         => "SQL_DESTRUCTIVE",
             Self::SqlPrivilegeEscalation { .. } => "SQL_PRIV_ESCALATION",
             Self::SqlFilesystemAccess { .. }    => "SQL_FILESYSTEM",
@@ -206,6 +212,16 @@ impl fmt::Display for ThreatError {
                     "  Remove or rotate the credentials before committing."
                 )
             }
+
+            Self::GitCommitInspectionFailed { detail } => write!(
+                f,
+                "[{}] cannot read staged changes from Git — commit blocked:\n\
+                 {}\n\
+                 protector runs `git` with `-c safe.directory=*` under the commit's working directory.\n\
+                 If this persists, fix repository permissions / ownership.",
+                self.code(),
+                detail
+            ),
 
             // ── SQL ───────────────────────────────────────────────────────────
             Self::SqlDestructive { tool, operations } => {

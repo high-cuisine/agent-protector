@@ -10,6 +10,7 @@ use tokio::signal;
 mod banner;
 mod data_policy;
 mod errors;
+mod reporter;
 mod tool_db;
 mod tracker;
 mod traffic_redirect;
@@ -18,6 +19,7 @@ mod validators;
 
 use protector_common::ExecEvent;
 use data_policy::DataPolicy;
+use reporter::Reporter;
 use tool_db::ToolDb;
 use tracker::ProcessTracker;
 use traffic_redirect::TrafficRedirector;
@@ -81,9 +83,10 @@ async fn async_main() -> anyhow::Result<()> {
     )?;
     let mut async_fd = AsyncFd::new(ring_buf)?;
 
-    let policy  = DataPolicy::load_default();
-    let tool_db = Arc::new(ToolDb::new(policy));
-    let tracker = Arc::new(Mutex::new(ProcessTracker::new()));
+    let policy   = DataPolicy::load_default();
+    let tool_db  = Arc::new(ToolDb::new(policy));
+    let tracker  = Arc::new(Mutex::new(ProcessTracker::new()));
+    let reporter = Arc::new(Reporter::new());
 
     // Optional transparent proxy redirect: redirect Claude HTTP/S traffic to a
     // local proxy without restarting Claude.  Pass --proxy-port <PORT> to enable.
@@ -137,7 +140,7 @@ async fn async_main() -> anyhow::Result<()> {
                     }
                     // SAFETY: eBPF program writes a well-formed ExecEvent into the ring buf
                     let event = unsafe { (item.as_ptr() as *const ExecEvent).read_unaligned() };
-                    handle_event(event, &tool_db, &tracker);
+                    handle_event(event, &tool_db, &tracker, &reporter);
                 }
 
                 guard.clear_ready();
@@ -148,7 +151,12 @@ async fn async_main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTracker>) {
+fn handle_event(
+    event:    ExecEvent,
+    tool_db:  &ToolDb,
+    tracker:  &Mutex<ProcessTracker>,
+    reporter: &Reporter,
+) {
     let filename = c_str(&event.filename);
     let comm = c_str(&event.comm);
 
@@ -188,7 +196,7 @@ fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTrack
 
     let Some(action) = tool_db.find_action(filename, &args) else {
         debug!(
-            "skip pid={} file={} comm={} args={:?} reason=no_matching_tool_rule (only git-commit is implemented)",
+            "skip pid={} file={} comm={} args={:?} reason=no_matching_tool_rule (argv does not match any ToolDb action)",
             event.pid, filename, comm, args
         );
         return;
@@ -215,17 +223,11 @@ fn handle_event(event: ExecEvent, tool_db: &ToolDb, tracker: &Mutex<ProcessTrack
             send_signal(event.pid, libc::SIGCONT);
         }
         ValidationResult::Warn(threat) => {
-            warn!(
-                "[{}] WARNING pid={} [{}]\n{}",
-                action.name, event.pid, threat.code(), threat
-            );
+            reporter.warn(action.name, event.pid, &ctx.args, &threat);
             send_signal(event.pid, libc::SIGCONT);
         }
         ValidationResult::Block(threat) => {
-            warn!(
-                "[{}] BLOCKED pid={} [{}]\n{}",
-                action.name, event.pid, threat.code(), threat
-            );
+            reporter.block(action.name, event.pid, &ctx.args, &threat);
             // SIGKILL first so the process exits, SIGCONT so it can receive the signal
             send_signal(event.pid, libc::SIGKILL);
             send_signal(event.pid, libc::SIGCONT);
