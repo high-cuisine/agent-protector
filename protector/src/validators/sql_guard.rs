@@ -147,9 +147,9 @@ impl Default for SqlAnalyzer {
 
             // WARN: Classic injection tautologies
             warn_pat!("OR 1=1 tautology",
-                "(?i)\\bOR\\s+(\\d+\\s*=\\s*\\d+|\\x27[^\\x27]*\\x27\\s*=\\s*\\x27[^\\x27]*\\x27)"),
+                r"(?i)\bOR\s+(\d+\s*=\s*\d+|\x27[^\x27]*\x27\s*=\s*\x27[^\x27]*\x27)"),
             warn_pat!("Comment-based injection",
-                "(?i)\\x27.{0,60}(--|/\\*)"),
+                r"(?i)\x27.{0,60}(--|/\*)"),
         ];
 
         Self {
