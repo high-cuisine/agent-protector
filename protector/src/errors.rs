@@ -107,6 +107,37 @@ pub enum ThreatError {
         pod: String,
         inner: Box<ThreatError>,
     },
+
+    // ── Data policy ───────────────────────────────────────────────────────────
+    /// Query against a table marked `block` in the data policy.
+    DataPolicyBlock {
+        tool: &'static str,
+        table: String,
+        columns: Vec<String>,
+    },
+
+    /// Query against a table marked `mask` — original process killed, masked
+    /// output already written to the agent's pipe.
+    DataPolicyMasked {
+        tool: &'static str,
+        table: String,
+        masked_columns: Vec<String>,
+    },
+
+    // ── Filesystem policy ─────────────────────────────────────────────────────
+    /// Access to a path marked `fblock` in the data policy.
+    FsPolicyBlock {
+        tool:    &'static str,
+        path:    String,
+        pattern: String,
+    },
+
+    /// Access to a path marked `fmask` — masked output already written to pipe.
+    FsPolicyMasked {
+        tool:    &'static str,
+        path:    String,
+        pattern: String,
+    },
 }
 
 /// A single credential / secret match inside a file.
@@ -141,6 +172,10 @@ impl ThreatError {
             Self::RedisDestructive { .. }       => "REDIS_DESTRUCTIVE",
             Self::RedisConfigChange { .. }      => "REDIS_CONFIG_CHANGE",
             Self::KubectlSqlThreat { .. }       => "KUBECTL_SQL_THREAT",
+            Self::DataPolicyBlock { .. }         => "DATA_POLICY_BLOCK",
+            Self::DataPolicyMasked { .. }        => "DATA_POLICY_MASKED",
+            Self::FsPolicyBlock { .. }           => "FS_POLICY_BLOCK",
+            Self::FsPolicyMasked { .. }          => "FS_POLICY_MASKED",
         }
     }
 }
@@ -345,6 +380,48 @@ impl fmt::Display for ThreatError {
                     f,
                     "[{}] redis-cli {}: {} — proceeding with warning.",
                     self.code(), command, detail
+                )
+            }
+
+            // ── Data policy ───────────────────────────────────────────────────
+            Self::DataPolicyBlock { tool, table, columns } => {
+                writeln!(
+                    f,
+                    "[{}] {}: access to protected table '{}' is blocked.",
+                    self.code(), tool, table
+                )?;
+                if !columns.is_empty() {
+                    writeln!(f, "  Protected columns: {}", columns.join(", "))?;
+                }
+                write!(
+                    f,
+                    "  Use explicit non-sensitive columns or request access through a data steward."
+                )
+            }
+
+            Self::DataPolicyMasked { tool, table, masked_columns } => {
+                writeln!(
+                    f,
+                    "[{}] {}: query against protected table '{}' — sensitive columns masked.",
+                    self.code(), tool, table
+                )?;
+                write!(f, "  Masked columns: {}", masked_columns.join(", "))
+            }
+
+            // ── Filesystem policy ─────────────────────────────────────────────
+            Self::FsPolicyBlock { tool, path, pattern } => {
+                write!(
+                    f,
+                    "[{}] {}: access to '{}' is blocked (matches protected pattern '{}').",
+                    self.code(), tool, path, pattern
+                )
+            }
+
+            Self::FsPolicyMasked { tool, path, pattern } => {
+                write!(
+                    f,
+                    "[{}] {}: content of '{}' was masked (matched protected pattern '{}').",
+                    self.code(), tool, path, pattern
                 )
             }
 

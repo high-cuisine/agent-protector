@@ -8,16 +8,33 @@ use tokio::io::unix::AsyncFd;
 use tokio::signal;
 
 mod banner;
+mod data_policy;
 mod errors;
 mod tool_db;
 mod tracker;
+mod traffic_redirect;
 mod validator;
 mod validators;
 
 use protector_common::ExecEvent;
+use data_policy::DataPolicy;
 use tool_db::ToolDb;
 use tracker::ProcessTracker;
+use traffic_redirect::TrafficRedirector;
 use validator::{ValidationContext, ValidationResult};
+
+fn parse_proxy_port() -> Option<u16> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--proxy-port" {
+            return args.get(i + 1).and_then(|v| v.parse().ok());
+        }
+        if let Some(v) = arg.strip_prefix("--proxy-port=") {
+            return v.parse().ok();
+        }
+    }
+    None
+}
 
 fn main() {
     // Print banner before the async runtime starts so it always appears,
@@ -64,8 +81,43 @@ async fn async_main() -> anyhow::Result<()> {
     )?;
     let mut async_fd = AsyncFd::new(ring_buf)?;
 
-    let tool_db = Arc::new(ToolDb::default());
+    let policy  = DataPolicy::load_default();
+    let tool_db = Arc::new(ToolDb::new(policy));
     let tracker = Arc::new(Mutex::new(ProcessTracker::new()));
+
+    // Optional transparent proxy redirect: redirect Claude HTTP/S traffic to a
+    // local proxy without restarting Claude.  Pass --proxy-port <PORT> to enable.
+    if let Some(proxy_port) = parse_proxy_port() {
+        match TrafficRedirector::new(proxy_port) {
+            Ok(redirector) => {
+                // Seed the cgroup with Claude PIDs already running.
+                {
+                    let t = tracker.lock().unwrap();
+                    redirector.track_pids(&t.claude_root_pids());
+                }
+                let redirector = Arc::new(redirector);
+                let tracker_task = Arc::clone(&tracker);
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(
+                        std::time::Duration::from_secs(5),
+                    );
+                    loop {
+                        interval.tick().await;
+                        let added = {
+                            let mut t = tracker_task.lock().unwrap();
+                            t.refresh_and_diff().0
+                        };
+                        if !added.is_empty() {
+                            redirector.track_pids(&added);
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                warn!("Traffic redirect disabled (requires root + iptables): {e}");
+            }
+        }
+    }
 
     info!("Protector started — monitoring Claude Code agent actions (RUST_LOG=debug for skip reasons)");
 
@@ -194,6 +246,9 @@ fn looks_interesting(filename: &str) -> bool {
         "npm", "pip", "pip3",
         // Network / container (future rules)
         "curl", "wget", "docker", "kubectl",
+        // Filesystem readers — watched when data policy has fblock/fmask rules
+        "cat", "head", "tail", "grep", "egrep", "fgrep",
+        "diff", "find", "cp", "mv",
     ];
     WATCHED
         .iter()

@@ -31,11 +31,20 @@ impl ProcessTracker {
         pids
     }
 
+    /// Refresh Claude PIDs and return the diff: (added, removed).
+    /// Use this from a background watcher to drive cgroup/iptables updates.
+    pub fn refresh_and_diff(&mut self) -> (Vec<u32>, Vec<u32>) {
+        let old = self.claude_pids.clone();
+        self.refresh_claude_pids();
+        let added = self.claude_pids.difference(&old).copied().collect();
+        let removed = old.difference(&self.claude_pids).copied().collect();
+        (added, removed)
+    }
+
     /// Returns true if `pid` is a descendant of a Claude Code process.
     pub fn is_claude_descendant(&mut self, pid: u32) -> bool {
         if self.last_claude_refresh.elapsed() > Duration::from_secs(5) {
             self.refresh_claude_pids();
-            self.last_claude_refresh = Instant::now();
         }
 
         let mut current = pid;
@@ -66,6 +75,7 @@ impl ProcessTracker {
 
     /// Scan /proc to find all running Claude Code processes.
     fn refresh_claude_pids(&mut self) {
+        self.last_claude_refresh = Instant::now();
         self.claude_pids.clear();
         // Evict stale ppid cache entries too
         self.ppid_cache.retain(|pid, _| proc_exists(*pid));

@@ -1,12 +1,35 @@
+use std::sync::Arc;
+
+use crate::data_policy::DataPolicy;
 use crate::validator::{ValidationContext, ValidationResult, Validator};
 use crate::validators::{
+    data_guard::DataGuardValidator,
     docker_guard::DockerGuardValidator,
+    fs_guard::{FsGuardValidator, PathStrategy},
     git_commit::GitCommitValidator,
     kubectl_guard::KubectlSqlGuardValidator,
     redis_guard::RedisGuardValidator,
     secret::SecretScanner,
     sql_guard::SqlGuardValidator,
 };
+
+// ── Composite validator ───────────────────────────────────────────────────────
+
+/// Runs `first`; if it returns Allow, runs `second`.
+/// Use it to layer DataGuard in front of the existing SQL guards.
+struct ChainedValidator {
+    first:  Box<dyn Validator>,
+    second: Box<dyn Validator>,
+}
+
+impl Validator for ChainedValidator {
+    fn validate(&self, ctx: &ValidationContext) -> ValidationResult {
+        match self.first.validate(ctx) {
+            ValidationResult::Allow => self.second.validate(ctx),
+            other                   => other,
+        }
+    }
+}
 
 /// One watchable tool action: which binary + which args trigger it, and the validator to run.
 pub struct ToolAction {
@@ -47,8 +70,26 @@ pub struct ToolDb {
     actions: Vec<ToolAction>,
 }
 
-impl Default for ToolDb {
-    fn default() -> Self {
+impl ToolDb {
+    /// Build the tool registry, optionally wrapping SQL validators with a
+    /// DataGuard that enforces the sensitive-table policy before sql_guard runs.
+    pub fn new(policy: Arc<DataPolicy>) -> Self {
+        let has_policy = !policy.is_empty();
+
+        // Helper: wrap a SQL validator with DataGuard when a policy is active.
+        macro_rules! sql_validator {
+            ($guard:expr, $data:expr) => {
+                if has_policy {
+                    Box::new(ChainedValidator {
+                        first:  Box::new($data),
+                        second: Box::new($guard),
+                    }) as Box<dyn Validator>
+                } else {
+                    Box::new($guard) as Box<dyn Validator>
+                }
+            };
+        }
+
         Self {
             actions: vec![
                 // ── Git ──────────────────────────────────────────────────────
@@ -66,7 +107,10 @@ impl Default for ToolDb {
                     command: "psql",
                     required_args: &[],
                     excluded_args: &["--help", "-?", "--version", "-V", "-l", "--list"],
-                    validator: Box::new(SqlGuardValidator::psql()),
+                    validator: sql_validator!(
+                        SqlGuardValidator::psql(),
+                        DataGuardValidator::psql(Arc::clone(&policy))
+                    ),
                 },
 
                 // ── MySQL / MariaDB ──────────────────────────────────────────
@@ -75,14 +119,20 @@ impl Default for ToolDb {
                     command: "mysql",
                     required_args: &[],
                     excluded_args: &["--help", "--version", "--print-defaults"],
-                    validator: Box::new(SqlGuardValidator::mysql()),
+                    validator: sql_validator!(
+                        SqlGuardValidator::mysql(),
+                        DataGuardValidator::mysql(Arc::clone(&policy))
+                    ),
                 },
                 ToolAction {
                     name: "mariadb",
                     command: "mariadb",
                     required_args: &[],
                     excluded_args: &["--help", "--version"],
-                    validator: Box::new(SqlGuardValidator::mysql()),
+                    validator: sql_validator!(
+                        SqlGuardValidator::mysql(),
+                        DataGuardValidator::mysql(Arc::clone(&policy))
+                    ),
                 },
 
                 // ── SQLite ───────────────────────────────────────────────────
@@ -91,7 +141,10 @@ impl Default for ToolDb {
                     command: "sqlite3",
                     required_args: &[],
                     excluded_args: &["--help", "--version"],
-                    validator: Box::new(SqlGuardValidator::sqlite3()),
+                    validator: sql_validator!(
+                        SqlGuardValidator::sqlite3(),
+                        DataGuardValidator::sqlite3(Arc::clone(&policy))
+                    ),
                 },
 
                 // ── Redis ────────────────────────────────────────────────────
@@ -119,6 +172,95 @@ impl Default for ToolDb {
                     required_args: &[],
                     excluded_args: &["--help", "-h", "--version"],
                     validator: Box::new(DockerGuardValidator::new()),
+                },
+
+                // ── Filesystem readers (cat / head / tail / diff / wc) ────────
+                ToolAction {
+                    name: "cat",
+                    command: "cat",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "cat", PathStrategy::AllPositional,
+                    )),
+                },
+                ToolAction {
+                    name: "head",
+                    command: "head",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "head", PathStrategy::AllPositional,
+                    )),
+                },
+                ToolAction {
+                    name: "tail",
+                    command: "tail",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "tail", PathStrategy::AllPositional,
+                    )),
+                },
+                ToolAction {
+                    name: "diff",
+                    command: "diff",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "diff", PathStrategy::AllPositional,
+                    )),
+                },
+
+                // ── grep / egrep / fgrep ─────────────────────────────────────
+                ToolAction {
+                    name: "grep",
+                    command: "grep",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "grep", PathStrategy::SkipFirstPositional,
+                    )),
+                },
+                ToolAction {
+                    name: "egrep",
+                    command: "egrep",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "egrep", PathStrategy::SkipFirstPositional,
+                    )),
+                },
+
+                // ── find ──────────────────────────────────────────────────────
+                ToolAction {
+                    name: "find",
+                    command: "find",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "find", PathStrategy::FirstPositional,
+                    )),
+                },
+
+                // ── cp / mv ───────────────────────────────────────────────────
+                ToolAction {
+                    name: "cp",
+                    command: "cp",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "cp", PathStrategy::FirstPositional2,
+                    )),
+                },
+                ToolAction {
+                    name: "mv",
+                    command: "mv",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: Box::new(FsGuardValidator::new(
+                        Arc::clone(&policy), "mv", PathStrategy::FirstPositional2,
+                    )),
                 },
             ],
         }

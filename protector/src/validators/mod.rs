@@ -1,4 +1,6 @@
+pub mod data_guard;
 pub mod docker_guard;
+pub mod fs_guard;
 pub mod git_commit;
 pub mod kubectl_guard;
 pub mod redis_guard;
