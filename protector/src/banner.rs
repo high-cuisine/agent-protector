@@ -1,55 +1,85 @@
 pub fn print_banner() {
-    // ── ANSI colours ─────────────────────────────────────────────────────────
-    let b   = "\x1b[34m";    // dark blue  — outlines / visor bars
-    let c   = "\x1b[96m";    // cyan       — armour fill
-    let f   = "\x1b[97m";    // bright white — feather
-    let n   = "\x1b[1;97m";  // bold white — product name
-    let g   = "\x1b[92m";    // green      — status tick / bullet
-    let dim = "\x1b[2;37m";  // dim grey   — section labels
-    let r   = "\x1b[0m";     // reset
+    let rs   = "\x1b[0m";
+    let pal  = |c: char| -> &'static str {
+        match c {
+            'K' => "\x1b[38;2;15;15;15m",
+            'D' => "\x1b[38;2;26;74;74m",
+            'M' => "\x1b[38;2;42;110;110m",
+            'L' => "\x1b[38;2;58;138;138m",
+            'R' => "\x1b[38;2;176;32;32m",
+            'N' => "\x1b[38;2;212;168;112m",
+            _   => "",
+        }
+    };
+    let bold = "\x1b[1;38;2;230;230;230m";
+    let dim  = "\x1b[38;2;140;140;140m";
+    let grn  = "\x1b[38;2;80;200;120m";
 
-    // Knight (left column ~34 chars) + info (right column, starts at col 36)
-    // Blank info slots keep the knight lines that don't need a side annotation.
-    let rows: &[(&str, &str)] = &[
-        // knight line                          info line
-        (r"                                 ", ""),
-        (r"           {f}` .{r}                    ", ""),
-        (r"          {f}.` `.{r}                   ", ""),
-        (r"         {f}.` . `.{r}                  ", ""),
-        (r"        {f}.`  .  `.{r}                 ", "{n}  sAinep{r}"),
-        (r"       {b}.`{c}  .----.  {b}`.{r}             ", "{dim}  AI Agent Security Guard{r}"),
-        (r"      {b}/  {c} /      \  {b} \{r}            ", "{dim}  ──────────────────────────{r}"),
-        (r"     {b}|  {c} | {b}||||||{c} |  {b}|{r}           ", "{dim}  eBPF · execve intercept{r}"),
-        (r"     {b}|  {c} | {b}||||||{c} |  {b}|{r}           ", ""),
-        (r"     {b}|  {c} | {b}||||||{c} |  {b}|{r}           ", "{dim}  Guarding:{r}"),
-        (r"      {b}\  {c} \      /  {b} /{r}            ", "{g}  ✓{r} git · psql · mysql · sqlite3"),
-        (r"       {b}`-{c}.`------`.{b}-`{r}           ", "{g}  ✓{r} redis-cli · docker · kubectl"),
-        (r"       {b}/\{r}           {b}/\{r}           ", ""),
-        (r"      {b}/  \           /  \{r}          ", "{dim}  Status:{r}  {g}● ACTIVE{r}"),
-        (r"     {b}/    \         /    \{r}    {b}.---------.{r}", ""),
-        (r"    {b}/   {c}..|..........|..{b}\{r}   {b}/  {c} /\{b}     \{r}", ""),
-        (r"   {b}|    {c}  |         |  {b} |{r}  {b}|  {c}/  \{b}     |{r}", ""),
-        (r"   {b}|    {c}  |   {b}[]{c}   |  {b} |{r}  {b}|  {c}/    \{b}    |{r}", ""),
-        (r"   {b}|    {c}  |         |  {b} |{r}  {b}| {c}/  /\ \{b}   |{r}", ""),
-        (r"    {b}\   {c}..|..........|..{b}/{r}   {b}| {c}\ /  \ /{b}   |{r}", ""),
-        (r"     {b}'--|          |--`{r}    {b}\  {c}`----`{b}  /{r}", ""),
-        (r"        {b}|          |{r}        {b}`---------`{r}", ""),
-        (r"       {b}/|          |\{r}       ", ""),
-        (r"      {b}/ |          | \{r}      ", ""),
-        (r"     {b}/__|          |__\{r}     ", ""),
-        (r"                                 ", ""),
+    let grid: [&str; 16] = [
+        "....RRRRRR........",
+        "....RRRRRR........",
+        "...DMMMMMMD.......",
+        "..DMMMMMMMMD......",
+        ".DMMDMMMMDMMD.....",
+        ".DMMDMMMMDMMD.....",
+        ".DKKKKKKKKKKD.....",
+        ".DKKKKKKKKKKD.....",
+        ".DMMDMMMMDMMD.DMMD",
+        ".DMMMMMMMMMMD.DLLD",
+        "NDDDDDDDDDDDDNDLLD",
+        "NDDKKKKKKKKDDNDLLD",
+        ".DDKKKKKKKKDD.DLLD",
+        ".DD........DD.DLLD",
+        ".DD........DD.DMMD",
+        ".DD........DD.....",
+    ];
+
+    let info: [String; 16] = [
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+        format!("{bold}sAinep{rs}"),
+        format!("{dim}AI Agent Security Guard{rs}"),
+        format!("{dim}──────────────────────{rs}"),
+        format!("{dim}eBPF · execve intercept{rs}"),
+        String::new(),
+        format!("{dim}Guarding:{rs}"),
+        format!("{grn}✓{rs} git · psql · mysql · sqlite3"),
+        format!("{grn}✓{rs} redis-cli · docker · kubectl"),
+        String::new(),
+        format!("{dim}Status:{rs}  {grn}● ACTIVE{rs}"),
+        String::new(),
+        String::new(),
     ];
 
     println!();
-    for (knight, info) in rows {
-        // substitute colour placeholders manually (raw strings keep \ as-is)
-        let line = knight
-            .replace("{b}", b).replace("{c}", c).replace("{f}", f)
-            .replace("{r}", r);
-        let info = info
-            .replace("{n}", n).replace("{g}", g).replace("{dim}", dim)
-            .replace("{b}", b).replace("{c}", c).replace("{r}", r);
-        println!("{line}{info}");
+    for (row, side) in grid.iter().zip(info.iter()) {
+        let mut out = String::from("  ");
+        let mut cur: Option<char> = None;
+        for ch in row.chars() {
+            if ch == '.' {
+                if cur.is_some() {
+                    out.push_str(rs);
+                    cur = None;
+                }
+                out.push_str("  ");
+            } else {
+                if cur != Some(ch) {
+                    out.push_str(pal(ch));
+                    cur = Some(ch);
+                }
+                out.push_str("██");
+            }
+        }
+        if cur.is_some() {
+            out.push_str(rs);
+        }
+        if !side.is_empty() {
+            out.push_str("   ");
+            out.push_str(side);
+        }
+        println!("{out}");
     }
     println!();
 }
