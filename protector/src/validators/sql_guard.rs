@@ -91,7 +91,7 @@ impl Default for SqlAnalyzer {
             block!(FilesystemAccess, "MySQL LOAD DATA INFILE",
                 r"(?i)\bLOAD\s+DATA\s+(LOCAL\s+)?INFILE\b"),
             block!(FilesystemAccess, "PostgreSQL COPY TO/FROM filesystem",
-                r"(?i)\bCOPY\b[^;]{0,400}\b(TO|FROM)\s+['\"/]"),
+                r#"(?i)\bCOPY\b[^;]{0,400}\b(TO|FROM)\s+['"/]"#),
             block!(FilesystemAccess, "PostgreSQL pg_read_file / pg_ls_dir / pg_stat_file",
                 r"(?i)\bPG_(READ_FILE|LS_DIR|STAT_FILE)\s*\("),
             block!(FilesystemAccess, "PostgreSQL pg_execute_server_program",
