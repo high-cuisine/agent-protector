@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protector — Rules Config</title>
+<style>
+  :root {
+    --bg:      #0d1117;
+    --bg2:     #161b22;
+    --bg3:     #1c2128;
+    --border:  #30363d;
+    --text:    #c9d1d9;
+    --muted:   #8b949e;
+    --accent:  #58a6ff;
+    --acc-dim: #1f3b5e;
+    --green:   #3fb950;
+    --green-d: #1a3624;
+    --yellow:  #d29922;
+    --yel-d:   #2d2008;
+    --red:     #f85149;
+    --red-d:   #3d1a1a;
+    --font:    'SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; min-height: 100vh; }
+
+  /* ── Header ── */
+  header {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: .05em; }
+  .logo span { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  #status {
+    font-size: 11px; padding: 3px 9px; border-radius: 4px; opacity: 0; transition: opacity .3s;
+  }
+  #status.visible { opacity: 1; }
+  #status.ok  { background: var(--green-d); color: var(--green); border: 1px solid var(--green); }
+  #status.err { background: var(--red-d);   color: var(--red);   border: 1px solid var(--red);   }
+
+  /* ── Buttons ── */
+  .btn {
+    background: var(--bg3); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 13px; border-radius: 6px; cursor: pointer;
+    font-family: var(--font); font-size: 11px; letter-spacing: .04em;
+    transition: background .15s, border-color .15s;
+  }
+  .btn:hover { background: var(--bg2); border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 700; }
+  .btn.primary:hover { background: #79c0ff; }
+
+  /* ── Tabs ── */
+  .tab-nav {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border);
+    padding: 0 24px; background: var(--bg2);
+  }
+  .tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 10px 18px; color: var(--muted); cursor: pointer;
+    font-family: var(--font); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    margin-bottom: -1px; transition: color .15s, border-color .15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .badge {
+    display: inline-block; background: var(--red); color: #fff;
+    border-radius: 10px; padding: 0 5px; font-size: 10px; margin-left: 5px; min-width: 16px; text-align: center;
+  }
+
+  /* ── Main ── */
+  main { max-width: 880px; margin: 0 auto; padding: 20px 24px 80px; }
+
+  /* ── Tool cards ── */
+  .category { margin-bottom: 18px; }
+  .cat-label { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; padding: 0 2px; }
+  .tool-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 5px; overflow: hidden; transition: border-color .15s; }
+  .tool-card.disabled { opacity: .45; }
+  .tool-header { display: flex; align-items: center; padding: 9px 14px; cursor: pointer; user-select: none; gap: 10px; }
+  .tool-header:hover { background: var(--bg3); }
+  .tool-name { font-size: 13px; font-weight: 600; color: var(--accent); flex: 1; }
+  .tool-meta { font-size: 10px; color: var(--muted); flex-shrink: 0; display: flex; gap: 5px; align-items: center; }
+  .meta-b { color: var(--red);    background: var(--red-d);   border-radius: 3px; padding: 1px 5px; }
+  .meta-a { color: var(--yellow); background: var(--yel-d);   border-radius: 3px; padding: 1px 5px; }
+  .meta-p { color: var(--muted);  background: var(--bg3);     border-radius: 3px; padding: 1px 5px; }
+  .chevron { color: var(--muted); font-size: 9px; transition: transform .2s; flex-shrink: 0; }
+  .tool-card.open .chevron { transform: rotate(90deg); }
+  .tool-rules { display: none; border-top: 1px solid var(--border); padding: 8px 14px; background: var(--bg); }
+  .tool-card.open .tool-rules { display: block; }
+
+  /* ── Rule row ── */
+  .rule-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid #1c2128; }
+  .rule-row:last-child { border-bottom: none; }
+  .rule-label { flex: 1; color: var(--text); font-size: 12px; }
+
+  /* ── 3-state segmented control ── */
+  .seg-group { display: flex; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); flex-shrink: 0; }
+  .seg {
+    flex: 1; padding: 3px 9px; font-size: 10px; font-family: var(--font); font-weight: 600;
+    letter-spacing: .05em; background: var(--bg3); color: var(--muted);
+    border: none; border-right: 1px solid var(--border); cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+  }
+  .seg:last-child { border-right: none; }
+  .seg:hover:not(.seg-active) { background: var(--bg2); color: var(--text); }
+  .seg-active.seg-pass  { background: var(--green-d); color: var(--green);  }
+  .seg-active.seg-alert { background: var(--yel-d);   color: var(--yellow); }
+  .seg-active.seg-block { background: var(--red-d);   color: var(--red);    }
+
+  /* ── Tool toggle ── */
+  .toggle { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .t-track {
+    position: absolute; cursor: pointer; inset: 0;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 18px;
+    transition: background .2s, border-color .2s;
+  }
+  .t-track::after {
+    content: ''; position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 10px; background: var(--muted); border-radius: 50%; transition: left .2s, background .2s;
+  }
+  .toggle input:checked + .t-track { background: var(--green-d); border-color: var(--green); }
+  .toggle input:checked + .t-track::after { left: 19px; background: var(--green); }
+
+  /* ── Alerts pane ── */
+  #pane-alerts { display: none; }
+  .alerts-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  }
+  .alerts-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .no-alerts { text-align: center; padding: 48px 0; color: var(--muted); font-size: 12px; letter-spacing: .05em; }
+
+  .alert-row {
+    display: grid;
+    grid-template-columns: 64px 110px 130px 170px 1fr;
+    align-items: baseline; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid #161b22; font-size: 12px;
+    cursor: pointer; transition: background .1s;
+  }
+  .alert-row:hover { background: var(--bg2); }
+  .alert-row:last-child { border-bottom: none; }
+  .a-time { color: var(--muted); font-size: 11px; }
+  .a-tool { color: var(--accent); background: var(--acc-dim); padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .a-rule { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .a-code { font-weight: 700; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .a-code.cat-secret  { color: #e3b341; }
+  .a-code.cat-sql     { color: var(--red); }
+  .a-code.cat-docker  { color: #bc8cff; }
+  .a-code.cat-redis   { color: #ff7b72; }
+  .a-code.cat-kubectl { color: var(--yellow); }
+  .a-code.cat-fs      { color: var(--muted); }
+  .a-msg { color: var(--text); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* expanded alert detail */
+  .alert-detail {
+    display: none; grid-column: 1 / -1;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; margin: 2px 0 6px; font-size: 11px;
+    white-space: pre-wrap; word-break: break-all; color: var(--text);
+  }
+  .alert-detail.visible { display: block; }
+  .detail-args { color: var(--muted); margin-top: 6px; }
+
+  .loading { text-align: center; padding: 48px 0; color: var(--muted); font-size: 11px; letter-spacing: .1em; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">▣ PROTECTOR <span>rules config</span></div>
+  <div class="header-actions">
+    <span id="status"></span>
+    <button class="btn" onclick="resetDefaults()">RESET DEFAULTS</button>
+    <button class="btn primary" onclick="saveConfig()">SAVE</button>
+    <form method="post" action="/logout" style="margin:0">
+      <button class="btn" type="submit">SIGN OUT</button>
+    </form>
+  </div>
+</header>
+
+<div class="tab-nav">
+  <button class="tab active" id="tab-rules-btn" onclick="showTab('rules')">Rules</button>
+  <button class="tab" id="tab-alerts-btn" onclick="showTab('alerts')">
+    Alerts<span class="badge" id="alert-badge" style="display:none">0</span>
+  </button>
+</div>
+
+<main>
+  <div id="pane-rules">
+    <div class="loading">loading…</div>
+  </div>
+
+  <div id="pane-alerts">
+    <div class="alerts-toolbar">
+      <span class="alerts-title">Recent Alerts (last 500)</span>
+      <button class="btn" onclick="clearAlerts()">CLEAR ALL</button>
+    </div>
+    <div id="alerts-list">
+      <div class="no-alerts">No alerts yet — the panel updates automatically.</div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const RULE_LABELS = {
+  secret_scan:          'Secret / API key detection',
+  destructive:          'Destructive operations',
+  privilege_escalation: 'Privilege escalation (GRANT, CREATE USER)',
+  filesystem_access:    'Filesystem access via DB engine',
+  remote_exec:          'Remote code execution (xp_cmdshell)',
+  injection:            'SQL injection patterns',
+  suspicious:           'Suspicious patterns (warn-level)',
+  config_change:        'Live config / persistence changes',
+  cluster_ops:          'Cluster topology changes',
+  acl_changes:          'ACL / permission modifications',
+  sql_threat:           'SQL threat detection in pod exec',
+  unsafe_run:           'Unsafe run flags (--privileged, caps)',
+  volume_destroy:       'Volume destruction (volume rm)',
+  force_remove:         'Force remove (-f flag)',
+  system_prune:         'System prune (docker system prune)',
+  swarm_ops:            'Swarm topology changes',
+  exec_warn:            'Container exec',
+  push_warn:            'Image push to registry',
+  login_warn:           'Registry login',
+  commit_warn:          'Container commit',
+  cp_warn:              'Host/container file copy',
+  path_block:           'Protected path — block access',
+  path_mask:            'Protected path — mask content',
+};
+
+const CATEGORIES = [
+  { label: 'VCS',               tools: ['git-commit'] },
+  { label: 'SQL Databases',     tools: ['psql', 'mysql', 'mariadb', 'sqlite3'] },
+  { label: 'Cache / Key-Value', tools: ['redis-cli'] },
+  { label: 'Kubernetes',        tools: ['kubectl-exec-sql'] },
+  { label: 'Containers',        tools: ['docker'] },
+  { label: 'Filesystem Tools',  tools: ['cat', 'head', 'tail', 'diff', 'grep', 'egrep', 'find', 'cp', 'mv'] },
+];
+
+const RULE_ORDER = {
+  'git-commit':       ['secret_scan'],
+  'psql':             ['destructive','privilege_escalation','filesystem_access','remote_exec','injection','suspicious'],
+  'mysql':            ['destructive','privilege_escalation','filesystem_access','remote_exec','injection','suspicious'],
+  'mariadb':          ['destructive','privilege_escalation','filesystem_access','remote_exec','injection','suspicious'],
+  'sqlite3':          ['destructive','privilege_escalation','filesystem_access','remote_exec','injection','suspicious'],
+  'redis-cli':        ['destructive','config_change','cluster_ops','acl_changes'],
+  'kubectl-exec-sql': ['sql_threat'],
+  'docker':           ['unsafe_run','volume_destroy','force_remove','system_prune','swarm_ops','exec_warn','push_warn','login_warn','commit_warn','cp_warn'],
+};
+
+const CODE_CAT = {
+  SECRET_LEAK: 'secret', GIT_COMMIT_INSPECT_FAILED: 'secret',
+  SQL_DESTRUCTIVE: 'sql', SQL_PRIV_ESCALATION: 'sql', SQL_FILESYSTEM: 'sql',
+  SQL_REMOTE_EXEC: 'sql', SQL_INJECTION: 'sql', SQL_SUSPICIOUS: 'sql',
+  DOCKER_UNSAFE_RUN: 'docker', DOCKER_VOLUME_DESTROY: 'docker', DOCKER_EXEC: 'docker',
+  DOCKER_PUSH: 'docker', DOCKER_LOGIN: 'docker', DOCKER_COMMIT: 'docker',
+  DOCKER_CP: 'docker', DOCKER_FORCE_REMOVE: 'docker',
+  REDIS_DESTRUCTIVE: 'redis', REDIS_CONFIG_CHANGE: 'redis',
+  KUBECTL_SQL_THREAT: 'kubectl',
+  FS_POLICY_BLOCK: 'fs', FS_POLICY_MASKED: 'fs',
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
+let config = null;
+let currentTab = 'rules';
+let lastAlertId = 0;
+let unreadCount = 0;
+const openCards = new Set();
+
+// ── Load & render ─────────────────────────────────────────────────────────────
+
+async function loadConfig() {
+  const r = await fetch('/api/rules');
+  config = await r.json();
+  renderRules();
+}
+
+function rulesForTool(toolName, toolCfg) {
+  const order = RULE_ORDER[toolName] || [];
+  const all = Object.keys(toolCfg.rules || {});
+  return [...order.filter(k => all.includes(k)), ...all.filter(k => !order.includes(k))];
+}
+
+function renderRules() {
+  const pane = document.getElementById('pane-rules');
+  pane.innerHTML = CATEGORIES.map(cat => {
+    const cards = cat.tools.map(toolName => {
+      const toolCfg = config.tools[toolName] || { enabled: true, rules: {} };
+      const keys = rulesForTool(toolName, toolCfg);
+      const enabled = toolCfg.enabled !== false;
+
+      const meta = buildMeta(toolName, toolCfg, keys);
+      const rules = keys.map(key => {
+        const action = (toolCfg.rules[key]) || 'block';
+        return `
+          <div class="rule-row">
+            <span class="rule-label">${RULE_LABELS[key] || key}</span>
+            <div class="seg-group" data-tool="${esc(toolName)}" data-rule="${esc(key)}">
+              ${['pass','alert','block'].map(a =>
+                `<button class="seg${action === a ? ' seg-active seg-'+a : ''}" data-val="${a}"
+                   onclick="setRule('${esc(toolName)}','${esc(key)}','${a}')">${a.toUpperCase()}</button>`
+              ).join('')}
+            </div>
+          </div>`;
+      }).join('');
+
+      return `
+        <div class="tool-card${enabled ? '' : ' disabled'}${openCards.has(toolName) ? ' open' : ''}" id="card-${esc(toolName)}">
+          <div class="tool-header" onclick="toggleCard('${esc(toolName)}')">
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" ${enabled ? 'checked' : ''}
+                     onchange="toggleTool('${esc(toolName)}',this.checked)">
+              <span class="t-track"></span>
+            </label>
+            <span class="tool-name">${toolName}</span>
+            <span class="tool-meta">${meta}</span>
+            <span class="chevron">▶</span>
+          </div>
+          <div class="tool-rules">${rules || '<span style="color:var(--muted);font-size:11px">No configurable rules</span>'}</div>
+        </div>`;
+    }).join('');
+
+    return `<div class="category"><div class="cat-label">${cat.label}</div>${cards}</div>`;
+  }).join('');
+}
+
+function buildMeta(toolName, toolCfg, keys) {
+  let b = 0, a = 0, p = 0;
+  for (const k of keys) {
+    const v = (toolCfg.rules[k]) || 'block';
+    if (v === 'block') b++;
+    else if (v === 'alert') a++;
+    else p++;
+  }
+  const parts = [];
+  if (b) parts.push(`<span class="meta-b">${b}B</span>`);
+  if (a) parts.push(`<span class="meta-a">${a}A</span>`);
+  if (p) parts.push(`<span class="meta-p">${p}P</span>`);
+  return parts.join(' ') || `<span class="meta-p">${keys.length}P</span>`;
+}
+
+// ── Rule interaction ──────────────────────────────────────────────────────────
+
+function toggleCard(toolName) {
+  if (openCards.has(toolName)) openCards.delete(toolName);
+  else openCards.add(toolName);
+  const card = document.getElementById('card-' + toolName);
+  if (card) card.classList.toggle('open');
+}
+
+function toggleTool(toolName, enabled) {
+  if (!config.tools[toolName]) config.tools[toolName] = { enabled: true, rules: {} };
+  config.tools[toolName].enabled = enabled;
+  const card = document.getElementById('card-' + toolName);
+  if (card) { if (enabled) card.classList.remove('disabled'); else card.classList.add('disabled'); }
+}
+
+function setRule(toolName, ruleKey, action) {
+  if (!config.tools[toolName]) config.tools[toolName] = { enabled: true, rules: {} };
+  config.tools[toolName].rules[ruleKey] = action;
+  // Update DOM without full re-render
+  const card = document.getElementById('card-' + toolName);
+  if (!card) return;
+  for (const group of card.querySelectorAll('.seg-group')) {
+    if (group.dataset.tool === toolName && group.dataset.rule === ruleKey) {
+      group.querySelectorAll('.seg').forEach(btn => {
+        const v = btn.dataset.val;
+        btn.className = 'seg' + (v === action ? ` seg-active seg-${v}` : '');
+      });
+      break;
+    }
+  }
+  // Update meta badge
+  const toolCfg = config.tools[toolName];
+  const keys = rulesForTool(toolName, toolCfg);
+  const metaEl = card.querySelector('.tool-meta');
+  if (metaEl) metaEl.innerHTML = buildMeta(toolName, toolCfg, keys);
+}
+
+// ── Save / reset ──────────────────────────────────────────────────────────────
+
+async function saveConfig() {
+  const r = await fetch('/api/rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  showStatus(r.ok ? 'ok' : 'err', r.ok ? '✓ Saved' : '✗ Error');
+}
+
+async function resetDefaults() {
+  const r = await fetch('/api/rules/reset', { method: 'POST' });
+  if (r.ok) {
+    config = await r.json();
+    renderRules();
+    showStatus('ok', '✓ Reset to defaults');
+  } else {
+    showStatus('err', '✗ Reset failed');
+  }
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+function showTab(tab) {
+  currentTab = tab;
+  document.getElementById('pane-rules').style.display   = tab === 'rules'  ? '' : 'none';
+  document.getElementById('pane-alerts').style.display  = tab === 'alerts' ? '' : 'none';
+  document.getElementById('tab-rules-btn').className  = 'tab' + (tab === 'rules'  ? ' active' : '');
+  document.getElementById('tab-alerts-btn').className = 'tab' + (tab === 'alerts' ? ' active' : '');
+  if (tab === 'alerts') {
+    unreadCount = 0;
+    updateBadge();
+  }
+}
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+
+async function loadAlerts() {
+  try {
+    const r = await fetch('/api/alerts');
+    const data = await r.json();
+    lastAlertId = data.last_id;
+    if (data.alerts.length > 0) {
+      renderAlertsList(data.alerts.reverse()); // newest first
+    }
+  } catch(e) { /* silent */ }
+}
+
+async function pollAlerts() {
+  try {
+    const r = await fetch(`/api/alerts?since=${lastAlertId}`);
+    const data = await r.json();
+    if (data.alerts.length > 0) {
+      lastAlertId = data.last_id;
+      prependAlerts(data.alerts.reverse());
+      if (currentTab !== 'alerts') {
+        unreadCount += data.alerts.length;
+        updateBadge();
+      }
+    }
+  } catch(e) { /* silent */ }
+}
+
+function renderAlertsList(alerts) {
+  const list = document.getElementById('alerts-list');
+  if (alerts.length === 0) {
+    list.innerHTML = '<div class="no-alerts">No alerts yet — the panel updates automatically.</div>';
+    return;
+  }
+  list.innerHTML = alerts.map(alertHtml).join('');
+}
+
+function prependAlerts(alerts) {
+  const list = document.getElementById('alerts-list');
+  const noEl = list.querySelector('.no-alerts');
+  if (noEl) noEl.remove();
+  const frag = document.createDocumentFragment();
+  for (const a of alerts) {
+    const div = document.createElement('div');
+    div.innerHTML = alertHtml(a);
+    frag.appendChild(div.firstElementChild);
+  }
+  list.insertBefore(frag, list.firstChild);
+}
+
+function alertHtml(a) {
+  const time = new Date(a.ts_ms).toLocaleTimeString('en-US', { hour12: false });
+  const cat  = CODE_CAT[a.threat_code] || 'fs';
+  const firstLine = escHtml(a.message.split('\n')[0].replace(/^\[[A-Z_]+\]\s*/, '').trim());
+  const fullMsg  = escHtml(a.message.trim());
+  const argsStr  = escHtml(a.args.join(' '));
+  const detailId = 'detail-' + a.id;
+  return `
+    <div class="alert-row" onclick="toggleDetail('${detailId}')">
+      <span class="a-time">${time}</span>
+      <span class="a-tool">${escHtml(a.tool)}</span>
+      <span class="a-rule">${escHtml(a.rule)}</span>
+      <span class="a-code cat-${cat}">${escHtml(a.threat_code)}</span>
+      <span class="a-msg">${firstLine}</span>
+    </div>
+    <div class="alert-detail" id="${detailId}">
+${fullMsg}<span class="detail-args">
+args: ${argsStr}  pid: ${a.pid}</span></div>`;
+}
+
+function toggleDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('visible');
+}
+
+async function clearAlerts() {
+  await fetch('/api/alerts/clear', { method: 'POST' });
+  document.getElementById('alerts-list').innerHTML =
+    '<div class="no-alerts">No alerts yet — the panel updates automatically.</div>';
+  unreadCount = 0;
+  updateBadge();
+}
+
+function updateBadge() {
+  const badge = document.getElementById('alert-badge');
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function esc(s) { return String(s).replace(/'/g, "\\'"); }
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showStatus(type, msg) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'visible ' + type;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+loadConfig();
+loadAlerts();
+setInterval(pollAlerts, 2000);
+</script>
+</body>
+</html>

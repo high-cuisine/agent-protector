@@ -9,18 +9,23 @@ license.workspace = true
 protector-common = { path = "../protector-common", features = ["user"] }
 
 anyhow = { workspace = true, default-features = true }
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "form", "query", "tokio", "macros"] }
+bcrypt = { workspace = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
 env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
     "rt-multi-thread",
     "net",
     "signal",
+    "sync",
     "io-util",
     "time",
 ] }

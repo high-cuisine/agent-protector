@@ -7,23 +7,45 @@ use std::sync::{Arc, Mutex};
 use tokio::io::unix::AsyncFd;
 use tokio::signal;
 
+mod alert_store;
+mod auth;
 mod banner;
 mod data_policy;
 mod errors;
+mod event_bus;
+mod inspect;
 mod reporter;
+mod rules_config;
+mod setup;
 mod tool_db;
 mod tracker;
 mod traffic_redirect;
 mod validator;
 mod validators;
+mod web_ui;
 
 use protector_common::ExecEvent;
+use alert_store::SharedAlertStore;
 use data_policy::DataPolicy;
+use event_bus::{EventSender, InspectOutcome, SharedHistory};
 use reporter::Reporter;
 use tool_db::ToolDb;
 use tracker::ProcessTracker;
 use traffic_redirect::TrafficRedirector;
 use validator::{ValidationContext, ValidationResult};
+
+fn parse_config_port() -> u16 {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--config-port" {
+            return args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(7878);
+        }
+        if let Some(v) = arg.strip_prefix("--config-port=") {
+            return v.parse().unwrap_or(7878);
+        }
+    }
+    7878
+}
 
 fn parse_proxy_port() -> Option<u16> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,8 +61,47 @@ fn parse_proxy_port() -> Option<u16> {
 }
 
 fn main() {
-    // Print banner before the async runtime starts so it always appears,
-    // even if eBPF loading fails immediately afterwards.
+    let args: Vec<String> = std::env::args().collect();
+
+    // --hash-password <pass>: print bcrypt hash and exit
+    if let Some(pos) = args.iter().position(|a| a == "--hash-password") {
+        match args.get(pos + 1) {
+            Some(pass) => {
+                println!("{}", auth::hash_password(pass));
+                std::process::exit(0);
+            }
+            None => {
+                eprintln!("Usage: protector --hash-password <password>");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Subcommand dispatch (no async runtime needed for these)
+    match args.get(1).map(String::as_str) {
+        Some("inspect") => {
+            let socket = event_bus::socket_path();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime")
+                .block_on(inspect::run(&socket))
+                .unwrap_or_else(|e| {
+                    eprintln!("inspect: {e:#}");
+                    std::process::exit(1);
+                });
+            return;
+        }
+        Some("setup") => {
+            if let Err(e) = setup::run() {
+                eprintln!("setup: {e:#}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        _ => {}
+    }
+
     banner::print_banner();
 
     tokio::runtime::Builder::new_multi_thread()
@@ -83,17 +144,48 @@ async fn async_main() -> anyhow::Result<()> {
     )?;
     let mut async_fd = AsyncFd::new(ring_buf)?;
 
-    let policy   = DataPolicy::load_default();
-    let tool_db  = Arc::new(ToolDb::new(policy));
+    let policy       = DataPolicy::load_default();
+    let rules_config = Arc::new(std::sync::RwLock::new(
+        rules_config::RulesConfig::load_or_default("rules.json"),
+    ));
+    let alert_store  = Arc::new(std::sync::Mutex::new(alert_store::AlertStore::new()));
+    let tool_db  = Arc::new(ToolDb::new(
+        policy,
+        Arc::clone(&rules_config),
+    ));
     let tracker  = Arc::new(Mutex::new(ProcessTracker::new()));
     let reporter = Arc::new(Reporter::new());
 
-    // Optional transparent proxy redirect: redirect Claude HTTP/S traffic to a
-    // local proxy without restarting Claude.  Pass --proxy-port <PORT> to enable.
+    // Event bus: broadcast + ring-buffer history for `protector inspect`
+    let event_tx  = event_bus::new_sender();
+    let history   = event_bus::new_history();
+    {
+        let tx   = event_tx.clone();
+        let hist = Arc::clone(&history);
+        tokio::spawn(async move {
+            if let Err(e) = event_bus::start_unix_server(tx, hist).await {
+                log::warn!("inspect socket: {e}");
+            }
+        });
+    }
+
+    let config_port  = parse_config_port();
+    let auth_state   = Arc::new(auth::AuthState::load());
+    {
+        let cfg_clone    = Arc::clone(&rules_config);
+        let auth_clone   = Arc::clone(&auth_state);
+        let alerts_clone = Arc::clone(&alert_store);
+        tokio::spawn(async move {
+            if let Err(e) = web_ui::start(cfg_clone, auth_clone, alerts_clone, config_port).await {
+                log::warn!("Config UI failed: {e}");
+            }
+        });
+    }
+
+    // Optional transparent proxy redirect
     if let Some(proxy_port) = parse_proxy_port() {
         match TrafficRedirector::new(proxy_port) {
             Ok(redirector) => {
-                // Seed the cgroup with Claude PIDs already running.
                 {
                     let t = tracker.lock().unwrap();
                     redirector.track_pids(&t.claude_root_pids());
@@ -140,7 +232,7 @@ async fn async_main() -> anyhow::Result<()> {
                     }
                     // SAFETY: eBPF program writes a well-formed ExecEvent into the ring buf
                     let event = unsafe { (item.as_ptr() as *const ExecEvent).read_unaligned() };
-                    handle_event(event, &tool_db, &tracker, &reporter);
+                    handle_event(event, &tool_db, &tracker, &reporter, &alert_store, &event_tx, &history);
                 }
 
                 guard.clear_ready();
@@ -156,13 +248,15 @@ fn handle_event(
     tool_db:  &ToolDb,
     tracker:  &Mutex<ProcessTracker>,
     reporter: &Reporter,
+    alerts:   &SharedAlertStore,
+    events:   &EventSender,
+    history:  &SharedHistory,
 ) {
     let filename = c_str(&event.filename);
     let comm = c_str(&event.comm);
 
     debug!("execve pid={} comm={} file={}", event.pid, comm, filename);
 
-    // Fast pre-filter: skip binaries we'd never watch
     if !looks_interesting(filename) {
         debug!(
             "skip pid={} file={} comm={} reason=not_in_tool_watchlist",
@@ -184,7 +278,6 @@ fn handle_event(
         return;
     }
 
-    // Read full argv from /proc before the process disappears
     let Some(args) = read_cmdline(event.pid) else {
         debug!(
             "skip pid={} file={} comm={} reason=no_cmdline_in_proc",
@@ -207,7 +300,6 @@ fn handle_event(
         event.pid, action.name, args
     );
 
-    // Freeze the process during validation to eliminate the race window
     send_signal(event.pid, libc::SIGSTOP);
 
     let ctx = ValidationContext {
@@ -217,22 +309,56 @@ fn handle_event(
         working_dir: cwd,
     };
 
-    match action.validate(&ctx) {
+    let outcome = match action.validate(&ctx) {
         ValidationResult::Allow => {
             info!("[{}] ALLOWED — resuming pid={}", action.name, event.pid);
             send_signal(event.pid, libc::SIGCONT);
+            InspectOutcome::Allowed
         }
         ValidationResult::Warn(threat) => {
             reporter.warn(action.name, event.pid, &ctx.args, &threat);
             send_signal(event.pid, libc::SIGCONT);
+            InspectOutcome::Warned {
+                threat_code: threat.code().to_string(),
+                message:     threat.to_string(),
+            }
         }
         ValidationResult::Block(threat) => {
             reporter.block(action.name, event.pid, &ctx.args, &threat);
-            // SIGKILL first so the process exits, SIGCONT so it can receive the signal
             send_signal(event.pid, libc::SIGKILL);
             send_signal(event.pid, libc::SIGCONT);
+            InspectOutcome::Blocked {
+                threat_code: threat.code().to_string(),
+                message:     threat.to_string(),
+            }
         }
-    }
+        ValidationResult::Alert { threat, rule } => {
+            alerts.lock().unwrap().push(
+                action.name.to_string(),
+                rule.clone(),
+                threat.code().to_string(),
+                threat.to_string(),
+                ctx.args.clone(),
+                ctx.pid,
+            );
+            reporter.warn(action.name, event.pid, &ctx.args, &threat);
+            send_signal(event.pid, libc::SIGCONT);
+            InspectOutcome::Alerted {
+                threat_code: threat.code().to_string(),
+                message:     threat.to_string(),
+            }
+        }
+    };
+
+    let ev = event_bus::InspectEvent {
+        ts_ms:   event_bus::now_ms(),
+        pid:     event.pid,
+        tool:    action.name.to_string(),
+        args:    ctx.args.clone(),
+        outcome,
+    };
+    event_bus::record(history, &ev);
+    let _ = events.send(ev);
 }
 
 /// Quick pre-filter: only pass events that could match something in ToolDb.

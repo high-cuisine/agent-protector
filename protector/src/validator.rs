@@ -14,6 +14,8 @@ pub enum ValidationResult {
     Block(ThreatError),
     /// The action is allowed but the agent is warned about the threat.
     Warn(ThreatError),
+    /// The action is allowed; threat is logged to the web alert panel.
+    Alert { threat: ThreatError, rule: String },
 }
 
 pub trait Validator: Send + Sync {

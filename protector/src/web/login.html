@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protector — Sign In</title>
+<style>
+  :root {
+    --bg:     #0d1117;
+    --bg2:    #161b22;
+    --bg3:    #1c2128;
+    --border: #30363d;
+    --text:   #c9d1d9;
+    --muted:  #8b949e;
+    --accent: #58a6ff;
+    --green:  #3fb950;
+    --red:    #f85149;
+    --red-dim:#3d1a1a;
+    --font:   'SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 380px;
+    padding: 24px;
+  }
+
+  .logo {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    margin-bottom: 28px;
+  }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 28px 24px;
+  }
+
+  .error {
+    display: none;
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .field {
+    margin-bottom: 14px;
+  }
+
+  label {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+
+  input[type="text"],
+  input[type="password"] {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus { border-color: var(--accent); }
+
+  button[type="submit"] {
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--accent);
+    color: #0d1117;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button[type="submit"]:hover { background: #79c0ff; }
+
+  .hint {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 20px;
+  }
+  .hint code {
+    color: var(--text);
+    background: var(--bg3);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">▣ PROTECTOR</div>
+  <div class="subtitle">rules config · sign in</div>
+  <div class="card">
+    <div class="error" id="err">Invalid username or password</div>
+    <form method="post" action="/login">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" name="username" value="admin" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" name="password" autofocus autocomplete="current-password">
+      </div>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+  <div class="hint">
+    Change password: <code>protector --hash-password &lt;pass&gt; &gt; admin.passwd</code>
+  </div>
+</div>
+<script>
+  if (location.search.includes('error=1'))
+    document.getElementById('err').style.display = 'block';
+</script>
+</body>
+</html>
