@@ -308,6 +308,70 @@
   #budget-status { font-size: 11px; margin-left: 4px; }
   #budget-status.ok  { color: var(--green); }
   #budget-status.err { color: var(--red); }
+
+  /* ── Firewall pane ── */
+  #pane-firewall { display: none; }
+  .fw-note {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 11px; color: var(--muted); line-height: 1.8;
+  }
+  .fw-note strong { color: var(--text); }
+  .fw-note code { color: var(--accent); background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
+  .fw-section {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 20px; margin-bottom: 14px;
+  }
+  .fw-section-title {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 14px;
+  }
+  .fw-row { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .fw-row:last-child { margin-bottom: 0; }
+  .fw-label { width: 160px; flex-shrink: 0; font-size: 12px; color: var(--text); }
+  .fw-label small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .fw-input {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text); font-family: var(--font); font-size: 12px;
+    padding: 5px 10px; outline: none; transition: border-color .15s;
+  }
+  .fw-input:focus { border-color: var(--accent); }
+  .fw-input.short { width: 90px; }
+  select.fw-input { cursor: pointer; }
+  .fw-rules-table { width: 100%; border-collapse: collapse; }
+  .fw-rules-table th {
+    text-align: left; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border);
+  }
+  .fw-rules-table td {
+    font-size: 11px; padding: 7px 8px; border-bottom: 1px solid #161b22; vertical-align: middle;
+  }
+  .fw-rules-table tr:last-child td { border-bottom: none; }
+  .fw-rule-name  { color: var(--text); font-weight: 600; }
+  .fw-tag { display: inline-block; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+  .fw-tag-allow { background: var(--green-d); color: var(--green); }
+  .fw-tag-block { background: var(--red-d);   color: var(--red);   }
+  .fw-tag-out   { background: var(--acc-dim); color: var(--accent); }
+  .fw-tag-in    { background: var(--yel-d);   color: var(--yellow); }
+  .fw-tag-both  { background: var(--bg3);     color: var(--muted);  }
+  .fw-add-section {
+    border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px;
+  }
+  .fw-add-title { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 10px; }
+  .fw-add-grid {
+    display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto; gap: 8px; align-items: center;
+  }
+  .fw-default-policy {
+    font-size: 11px; color: var(--muted); margin-top: 10px;
+    padding: 8px 10px; background: var(--bg3); border-radius: 5px; border: 1px solid var(--border);
+  }
+  .fw-default-policy strong { color: var(--text); }
+  .fw-policy-deny  { color: var(--red); }
+  .fw-policy-allow { color: var(--green); }
+  .fw-empty { color: var(--muted); font-size: 12px; padding: 16px 8px; }
+  .fw-actions { display: flex; gap: 10px; margin-top: 8px; align-items: center; }
+  #fw-status { font-size: 11px; margin-left: 4px; }
+  #fw-status.ok  { color: var(--green); }
+  #fw-status.err { color: var(--red); }
 </style>
 </head>
 <body>
@@ -334,7 +398,8 @@
   <button class="tab" id="tab-secrets-btn" onclick="showTab('secrets')">
     Secrets<span class="badge" id="secrets-badge" style="display:none">0</span>
   </button>
-  <button class="tab" id="tab-budget-btn" onclick="showTab('budget')">Budget</button>
+  <button class="tab" id="tab-budget-btn"   onclick="showTab('budget')">Budget</button>
+  <button class="tab" id="tab-firewall-btn" onclick="showTab('firewall')">Firewall</button>
 </div>
 
 <main>
@@ -417,6 +482,85 @@
         <button class="btn danger"  onclick="resetBudgetTask()">RESET TASK COUNTERS</button>
         <span id="budget-status"></span>
       </div>
+    </div>
+  </div>
+
+  <div id="pane-firewall">
+    <div class="fw-note">
+      <strong>L3/L4 Network Firewall</strong> — controls the agent's network access using iptables
+      filter chains scoped to the agent's cgroup.<br>
+      Rules are matched in order (first match wins). The mode sets the <em>default policy</em> for
+      traffic that matches no rule.<br>
+      Requires: <code>root</code>, <code>iptables</code> with <code>xt_cgroup</code> +
+      <code>xt_conntrack</code> modules, cgroup v2 mounted at <code>/sys/fs/cgroup</code>.
+    </div>
+
+    <div class="fw-section">
+      <div class="fw-section-title">Policy</div>
+      <div class="fw-row">
+        <span class="fw-label">Enable firewall</span>
+        <label class="toggle">
+          <input type="checkbox" id="fw-enabled" onchange="fwDirty()">
+          <span class="t-track"></span>
+        </label>
+      </div>
+      <div class="fw-row">
+        <span class="fw-label">
+          Default mode
+          <small>Sets the policy for unmatched traffic</small>
+        </span>
+        <div class="seg-group" style="width:210px">
+          <button class="seg seg-active seg-pass" id="fw-mode-bl" onclick="setFwMode('blacklist')">BLACKLIST</button>
+          <button class="seg"                     id="fw-mode-wl" onclick="setFwMode('whitelist')">WHITELIST</button>
+        </div>
+      </div>
+      <div class="fw-default-policy" id="fw-policy-desc">
+        <strong>Blacklist</strong> — unmatched traffic is
+        <span class="fw-policy-allow">ALLOWED</span>.
+        Add <strong>BLOCK</strong> rules to deny specific destinations.
+      </div>
+    </div>
+
+    <div class="fw-section">
+      <div class="fw-section-title">Rules — matched in order, first match wins</div>
+
+      <div id="fw-rules-list">
+        <div class="fw-empty">No rules yet. Add one below.</div>
+      </div>
+
+      <div class="fw-add-section">
+        <div class="fw-add-title">Add rule</div>
+        <div class="fw-add-grid">
+          <input  type="text"   id="fw-new-name"   class="fw-input" placeholder="Rule name">
+          <select id="fw-new-dir"    class="fw-input">
+            <option value="out">Out</option>
+            <option value="in">In</option>
+            <option value="both">Both</option>
+          </select>
+          <select id="fw-new-proto"  class="fw-input">
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+            <option value="any">Any</option>
+          </select>
+          <input  type="text"   id="fw-new-cidr"   class="fw-input" placeholder="CIDR or empty">
+          <input  type="number" id="fw-new-port-lo" class="fw-input" placeholder="Port" min="0" max="65535">
+          <select id="fw-new-action" class="fw-input">
+            <option value="block">BLOCK</option>
+            <option value="allow">ALLOW</option>
+          </select>
+          <button class="btn" onclick="addFwRule()">+ ADD</button>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">
+          CIDR: e.g. <code>203.0.113.0/24</code> or empty = any &nbsp;|&nbsp;
+          Port: single number or leave blank = any &nbsp;|&nbsp;
+          Out = agent→internet, In = internet→agent
+        </div>
+      </div>
+    </div>
+
+    <div class="fw-actions">
+      <button class="btn primary" onclick="saveFirewall()">SAVE AND APPLY</button>
+      <span id="fw-status"></span>
     </div>
   </div>
 
@@ -736,15 +880,18 @@ function showTab(tab) {
   document.getElementById('pane-alerts').style.display  = tab === 'alerts'  ? '' : 'none';
   document.getElementById('pane-siem').style.display    = tab === 'siem'    ? '' : 'none';
   document.getElementById('pane-secrets').style.display = tab === 'secrets' ? '' : 'none';
-  document.getElementById('pane-budget').style.display  = tab === 'budget'  ? '' : 'none';
-  document.getElementById('tab-rules-btn').className   = 'tab' + (tab === 'rules'   ? ' active' : '');
-  document.getElementById('tab-alerts-btn').className  = 'tab' + (tab === 'alerts'  ? ' active' : '');
-  document.getElementById('tab-siem-btn').className    = 'tab' + (tab === 'siem'    ? ' active' : '');
-  document.getElementById('tab-secrets-btn').className = 'tab' + (tab === 'secrets' ? ' active' : '');
-  document.getElementById('tab-budget-btn').className  = 'tab' + (tab === 'budget'  ? ' active' : '');
-  if (tab === 'alerts') { unreadCount = 0; updateBadge(); }
-  if (tab === 'secrets') loadSecrets();
-  if (tab === 'budget')  loadBudget();
+  document.getElementById('pane-budget').style.display   = tab === 'budget'   ? '' : 'none';
+  document.getElementById('pane-firewall').style.display = tab === 'firewall' ? '' : 'none';
+  document.getElementById('tab-rules-btn').className    = 'tab' + (tab === 'rules'    ? ' active' : '');
+  document.getElementById('tab-alerts-btn').className   = 'tab' + (tab === 'alerts'   ? ' active' : '');
+  document.getElementById('tab-siem-btn').className     = 'tab' + (tab === 'siem'     ? ' active' : '');
+  document.getElementById('tab-secrets-btn').className  = 'tab' + (tab === 'secrets'  ? ' active' : '');
+  document.getElementById('tab-budget-btn').className   = 'tab' + (tab === 'budget'   ? ' active' : '');
+  document.getElementById('tab-firewall-btn').className = 'tab' + (tab === 'firewall' ? ' active' : '');
+  if (tab === 'alerts')   { unreadCount = 0; updateBadge(); }
+  if (tab === 'secrets')  loadSecrets();
+  if (tab === 'budget')   loadBudget();
+  if (tab === 'firewall') loadFirewall();
 }
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
@@ -1164,6 +1311,139 @@ setInterval(async () => {
     renderBudgetUsage(data.config, data.task);
   } catch(e) {}
 }, 5000);
+
+// ── Firewall ──────────────────────────────────────────────────────────────────
+
+let fwConfig = { enabled: false, mode: 'blacklist', rules: [], next_id: 1 };
+
+async function loadFirewall() {
+  try {
+    const r = await fetch('/api/firewall');
+    fwConfig = await r.json();
+    document.getElementById('fw-enabled').checked = fwConfig.enabled;
+    setFwMode(fwConfig.mode, false);
+    renderFwRules();
+  } catch(e) { /* silent */ }
+}
+
+function fwDirty() { /* config changes tracked in fwConfig directly */ }
+
+function setFwMode(mode, dirty = true) {
+  fwConfig.mode = mode;
+  const bl = document.getElementById('fw-mode-bl');
+  const wl = document.getElementById('fw-mode-wl');
+  bl.className = 'seg' + (mode === 'blacklist' ? ' seg-active seg-pass'  : '');
+  wl.className = 'seg' + (mode === 'whitelist' ? ' seg-active seg-block' : '');
+  const desc = document.getElementById('fw-policy-desc');
+  if (mode === 'whitelist') {
+    desc.innerHTML = '<strong>Whitelist</strong> — unmatched traffic is <span class="fw-policy-deny">BLOCKED</span>. Add <strong>ALLOW</strong> rules to permit specific destinations.';
+  } else {
+    desc.innerHTML = '<strong>Blacklist</strong> — unmatched traffic is <span class="fw-policy-allow">ALLOWED</span>. Add <strong>BLOCK</strong> rules to deny specific destinations.';
+  }
+}
+
+function renderFwRules() {
+  const el = document.getElementById('fw-rules-list');
+  if (!fwConfig.rules || fwConfig.rules.length === 0) {
+    el.innerHTML = '<div class="fw-empty">No rules yet. Add one below.</div>';
+    return;
+  }
+  const rows = fwConfig.rules.map((r, i) => {
+    const actTag  = r.action === 'allow'
+      ? '<span class="fw-tag fw-tag-allow">ALLOW</span>'
+      : '<span class="fw-tag fw-tag-block">BLOCK</span>';
+    const dirTag = r.direction === 'out'  ? '<span class="fw-tag fw-tag-out">OUT</span>'
+                 : r.direction === 'in'   ? '<span class="fw-tag fw-tag-in">IN</span>'
+                 : '<span class="fw-tag fw-tag-both">BOTH</span>';
+    const proto  = r.protocol === 'any' ? 'Any' : r.protocol.toUpperCase();
+    const cidr   = r.remote_cidr || 'any';
+    const portStr = r.port_min > 0
+      ? (r.port_max > r.port_min ? `${r.port_min}–${r.port_max}` : String(r.port_min))
+      : 'any';
+    const enCheck = `<label class="toggle" style="transform:scale(.8)"><input type="checkbox" ${r.enabled?'checked':''} onchange="toggleFwRule(${i},this.checked)"><span class="t-track"></span></label>`;
+    return `
+      <tr>
+        <td>${enCheck}</td>
+        <td><span class="fw-rule-name">${escHtml(r.name || '—')}</span></td>
+        <td>${dirTag}</td>
+        <td style="color:var(--muted)">${proto}</td>
+        <td style="color:var(--text);font-family:var(--font);font-size:10px">${escHtml(cidr)}</td>
+        <td style="color:var(--muted)">${portStr}</td>
+        <td>${actTag}</td>
+        <td>
+          <button class="btn" style="padding:2px 6px;font-size:9px" onclick="moveFwRule(${i},-1)" title="Move up">↑</button>
+          <button class="btn" style="padding:2px 6px;font-size:9px" onclick="moveFwRule(${i},+1)" title="Move down">↓</button>
+          <button class="btn" style="padding:2px 8px;font-size:10px" onclick="removeFwRule(${i})">✕</button>
+        </td>
+      </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <table class="fw-rules-table">
+      <thead><tr>
+        <th></th><th>Name</th><th>Dir</th><th>Proto</th>
+        <th>Remote CIDR</th><th>Port</th><th>Action</th><th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function addFwRule() {
+  const name   = document.getElementById('fw-new-name').value.trim();
+  const dir    = document.getElementById('fw-new-dir').value;
+  const proto  = document.getElementById('fw-new-proto').value;
+  const cidr   = document.getElementById('fw-new-cidr').value.trim();
+  const portLo = parseInt(document.getElementById('fw-new-port-lo').value) || 0;
+  const action = document.getElementById('fw-new-action').value;
+  fwConfig.rules.push({
+    id: fwConfig.next_id++,
+    enabled: true,
+    name,
+    direction:   dir,
+    protocol:    proto,
+    remote_cidr: cidr,
+    port_min:    portLo,
+    port_max:    portLo,
+    action,
+  });
+  document.getElementById('fw-new-name').value   = '';
+  document.getElementById('fw-new-cidr').value   = '';
+  document.getElementById('fw-new-port-lo').value = '';
+  renderFwRules();
+}
+
+function removeFwRule(idx) {
+  fwConfig.rules.splice(idx, 1);
+  renderFwRules();
+}
+
+function toggleFwRule(idx, enabled) {
+  if (fwConfig.rules[idx]) fwConfig.rules[idx].enabled = enabled;
+}
+
+function moveFwRule(idx, delta) {
+  const target = idx + delta;
+  if (target < 0 || target >= fwConfig.rules.length) return;
+  [fwConfig.rules[idx], fwConfig.rules[target]] = [fwConfig.rules[target], fwConfig.rules[idx]];
+  renderFwRules();
+}
+
+async function saveFirewall() {
+  fwConfig.enabled = document.getElementById('fw-enabled').checked;
+  const r = await fetch('/api/firewall', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(fwConfig),
+  });
+  setFwStatus(r.ok, r.ok ? '✓ Saved and applied' : '✗ Error');
+}
+
+function setFwStatus(ok, msg) {
+  const el = document.getElementById('fw-status');
+  el.textContent = msg;
+  el.className = ok ? 'ok' : 'err';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; el.className = ''; }, 3500);
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 

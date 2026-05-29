@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::alert_store::{AlertEntry, SharedAlertStore};
 use crate::auth::AuthState;
 use crate::budget::{BudgetConfig, SharedBudget, TaskSnapshot};
+use crate::firewall_config::{FirewallConfig, SharedFirewallConfig};
+use crate::network_firewall::NetworkFirewall;
 use crate::rules_config::{RulesConfig, SharedRulesConfig};
 use crate::secret_proxy::{SecretSummary, SharedSecretStore};
 use crate::siem::SiemSender;
@@ -28,26 +30,30 @@ static LOGIN_HTML: &str = include_str!("web/login.html");
 
 #[derive(Clone)]
 struct AppState {
-    rules:   SharedRulesConfig,
-    auth:    Arc<AuthState>,
-    alerts:  SharedAlertStore,
-    siem:    SharedSiemConfig,
-    sender:  Arc<Mutex<SiemSender>>,
-    secrets: SharedSecretStore,
-    budget:  SharedBudget,
+    rules:      SharedRulesConfig,
+    auth:       Arc<AuthState>,
+    alerts:     SharedAlertStore,
+    siem:       SharedSiemConfig,
+    sender:     Arc<Mutex<SiemSender>>,
+    secrets:    SharedSecretStore,
+    budget:     SharedBudget,
+    fw_config:  SharedFirewallConfig,
+    fw:         Option<Arc<NetworkFirewall>>,
 }
 
 pub async fn start(
-    rules:   SharedRulesConfig,
-    auth:    Arc<AuthState>,
-    alerts:  SharedAlertStore,
-    siem:    SharedSiemConfig,
-    sender:  Arc<Mutex<SiemSender>>,
-    secrets: SharedSecretStore,
-    budget:  SharedBudget,
-    port:    u16,
+    rules:     SharedRulesConfig,
+    auth:      Arc<AuthState>,
+    alerts:    SharedAlertStore,
+    siem:      SharedSiemConfig,
+    sender:    Arc<Mutex<SiemSender>>,
+    secrets:   SharedSecretStore,
+    budget:    SharedBudget,
+    fw_config: SharedFirewallConfig,
+    fw:        Option<Arc<NetworkFirewall>>,
+    port:      u16,
 ) -> anyhow::Result<()> {
-    let state = AppState { rules, auth, alerts, siem, sender, secrets, budget };
+    let state = AppState { rules, auth, alerts, siem, sender, secrets, budget, fw_config, fw };
 
     let app = Router::new()
         // Protected routes
@@ -63,6 +69,7 @@ pub async fn start(
         .route("/api/secrets/clear", post(clear_secrets))
         .route("/api/budget", get(get_budget).post(set_budget))
         .route("/api/budget/reset", post(reset_budget))
+        .route("/api/firewall", get(get_firewall).post(set_firewall))
         .route("/logout", post(do_logout))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         // Public routes
@@ -348,6 +355,38 @@ async fn set_budget(
 async fn reset_budget(State(state): State<AppState>) -> StatusCode {
     state.budget.write().unwrap().reset_task();
     info!("Budget task reset via web UI");
+    StatusCode::OK
+}
+
+// ── Firewall API ──────────────────────────────────────────────────────────────
+
+async fn get_firewall(State(state): State<AppState>) -> Json<FirewallConfig> {
+    Json(state.fw_config.read().unwrap().clone())
+}
+
+async fn set_firewall(
+    State(state): State<AppState>,
+    Json(new_config): Json<FirewallConfig>,
+) -> StatusCode {
+    if let Err(e) = new_config.save() {
+        error!("save firewall: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    *state.fw_config.write().unwrap() = new_config.clone();
+
+    // Re-apply iptables rules (blocking I/O — spawn_blocking so we don't block the executor)
+    let fw = state.fw.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(fw) = fw {
+            if let Err(e) = fw.apply(&new_config) {
+                log::warn!("[firewall] apply failed: {e}");
+            }
+        }
+    })
+    .await
+    .ok();
+
+    info!("Firewall config saved and applied");
     StatusCode::OK
 }
 

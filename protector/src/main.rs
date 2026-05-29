@@ -14,7 +14,9 @@ mod budget;
 mod data_policy;
 mod errors;
 mod event_bus;
+mod firewall_config;
 mod inspect;
+mod network_firewall;
 mod reporter;
 mod rules_config;
 mod secret_proxy;
@@ -181,6 +183,41 @@ async fn async_main() -> anyhow::Result<()> {
     let secret_store = secret_proxy::new_store();
     let shared_budget = budget::new_shared(budget::BudgetConfig::load_or_default());
 
+    // L3/L4 network firewall
+    let fw_config = firewall_config::new_shared(firewall_config::FirewallConfig::load_or_default());
+    let network_fw = match network_firewall::NetworkFirewall::new() {
+        Ok(fw) => {
+            {
+                let cfg = fw_config.read().unwrap();
+                if let Err(e) = fw.apply(&cfg) {
+                    warn!("Firewall initial apply failed (iptables unavailable?): {e}");
+                }
+            }
+            let fw = std::sync::Arc::new(fw);
+            // Track existing Claude PIDs into the cgroup
+            {
+                let t = tracker.lock().unwrap();
+                fw.track_pids(&t.claude_root_pids());
+            }
+            // Keep cgroup up-to-date (runs in parallel with TrafficRedirector's own loop)
+            let fw_task   = std::sync::Arc::clone(&fw);
+            let trkr_task = Arc::clone(&tracker);
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+                loop {
+                    interval.tick().await;
+                    let pids = { trkr_task.lock().unwrap().claude_root_pids() };
+                    if !pids.is_empty() { fw_task.track_pids(&pids); }
+                }
+            });
+            Some(fw)
+        }
+        Err(e) => {
+            warn!("Network firewall unavailable: {e}");
+            None
+        }
+    };
+
     // Event bus: broadcast + ring-buffer history for `protector inspect`
     let event_tx  = event_bus::new_sender();
     let history   = event_bus::new_history();
@@ -204,8 +241,10 @@ async fn async_main() -> anyhow::Result<()> {
         let sender_clone  = Arc::clone(&siem_sender);
         let secrets_clone = Arc::clone(&secret_store);
         let budget_clone  = Arc::clone(&shared_budget);
+        let fw_cfg_clone  = Arc::clone(&fw_config);
+        let fw_clone      = network_fw.as_ref().map(Arc::clone);
         tokio::spawn(async move {
-            if let Err(e) = web_ui::start(cfg_clone, auth_clone, alerts_clone, siem_clone, sender_clone, secrets_clone, budget_clone, config_port).await {
+            if let Err(e) = web_ui::start(cfg_clone, auth_clone, alerts_clone, siem_clone, sender_clone, secrets_clone, budget_clone, fw_cfg_clone, fw_clone, config_port).await {
                 log::warn!("Config UI failed: {e}");
             }
         });
