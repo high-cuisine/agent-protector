@@ -371,8 +371,34 @@ impl ToolDb {
                         Arc::clone(&policy), "mv", PathStrategy::FirstPositional2,
                     ))),
                 },
+
+                // ── curl / wget (secret proxy intercepts before validation) ─────
+                ToolAction {
+                    name: "curl",
+                    command: "curl",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version", "-V"],
+                    validator: configured!("curl", Box::new(AllowAllValidator)),
+                },
+                ToolAction {
+                    name: "wget",
+                    command: "wget",
+                    required_args: &[],
+                    excluded_args: &["--help", "--version"],
+                    validator: configured!("wget", Box::new(AllowAllValidator)),
+                },
             ],
         }
+    }
+}
+
+/// Passthrough validator — used for tools where all enforcement happens
+/// before validation (e.g. secret proxy relay for curl/wget).
+struct AllowAllValidator;
+
+impl crate::validator::Validator for AllowAllValidator {
+    fn validate(&self, _ctx: &crate::validator::ValidationContext) -> crate::validator::ValidationResult {
+        crate::validator::ValidationResult::Allow
     }
 }
 

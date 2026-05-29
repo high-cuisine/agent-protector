@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 pub type EventSender  = broadcast::Sender<InspectEvent>;
 pub type SharedHistory = Arc<Mutex<VecDeque<InspectEvent>>>;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum InspectOutcome {
     Allowed,
@@ -15,7 +15,7 @@ pub enum InspectOutcome {
     Blocked { threat_code: String, message: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InspectEvent {
     pub ts_ms:   u64,
     pub pid:     u32,
@@ -78,7 +78,7 @@ async fn serve_client(
     mut rx:  broadcast::Receiver<InspectEvent>,
     history: SharedHistory,
 ) {
-    use tokio::io::{AsyncWriteExt, BufWriter};
+    use tokio::io::BufWriter;
 
     let mut w = BufWriter::new(stream);
 

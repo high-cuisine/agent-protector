@@ -10,13 +10,18 @@ use tokio::signal;
 mod alert_store;
 mod auth;
 mod banner;
+mod budget;
 mod data_policy;
 mod errors;
 mod event_bus;
 mod inspect;
 mod reporter;
 mod rules_config;
+mod secret_proxy;
 mod setup;
+mod siem;
+mod siem_config;
+mod token_proxy;
 mod tool_db;
 mod tracker;
 mod traffic_redirect;
@@ -29,6 +34,8 @@ use alert_store::SharedAlertStore;
 use data_policy::DataPolicy;
 use event_bus::{EventSender, InspectOutcome, SharedHistory};
 use reporter::Reporter;
+use secret_proxy::SharedSecretStore;
+use siem::SiemSender;
 use tool_db::ToolDb;
 use tracker::ProcessTracker;
 use traffic_redirect::TrafficRedirector;
@@ -54,6 +61,19 @@ fn parse_proxy_port() -> Option<u16> {
             return args.get(i + 1).and_then(|v| v.parse().ok());
         }
         if let Some(v) = arg.strip_prefix("--proxy-port=") {
+            return v.parse().ok();
+        }
+    }
+    None
+}
+
+fn parse_budget_port() -> Option<u16> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--budget-port" {
+            return args.get(i + 1).and_then(|v| v.parse().ok());
+        }
+        if let Some(v) = arg.strip_prefix("--budget-port=") {
             return v.parse().ok();
         }
     }
@@ -156,6 +176,11 @@ async fn async_main() -> anyhow::Result<()> {
     let tracker  = Arc::new(Mutex::new(ProcessTracker::new()));
     let reporter = Arc::new(Reporter::new());
 
+    let siem_config  = siem_config::new_shared(siem_config::SiemConfig::load_or_default());
+    let siem_sender  = Arc::new(Mutex::new(SiemSender::new(Arc::clone(&siem_config))));
+    let secret_store = secret_proxy::new_store();
+    let shared_budget = budget::new_shared(budget::BudgetConfig::load_or_default());
+
     // Event bus: broadcast + ring-buffer history for `protector inspect`
     let event_tx  = event_bus::new_sender();
     let history   = event_bus::new_history();
@@ -175,9 +200,23 @@ async fn async_main() -> anyhow::Result<()> {
         let cfg_clone    = Arc::clone(&rules_config);
         let auth_clone   = Arc::clone(&auth_state);
         let alerts_clone = Arc::clone(&alert_store);
+        let siem_clone    = Arc::clone(&siem_config);
+        let sender_clone  = Arc::clone(&siem_sender);
+        let secrets_clone = Arc::clone(&secret_store);
+        let budget_clone  = Arc::clone(&shared_budget);
         tokio::spawn(async move {
-            if let Err(e) = web_ui::start(cfg_clone, auth_clone, alerts_clone, config_port).await {
+            if let Err(e) = web_ui::start(cfg_clone, auth_clone, alerts_clone, siem_clone, sender_clone, secrets_clone, budget_clone, config_port).await {
                 log::warn!("Config UI failed: {e}");
+            }
+        });
+    }
+
+    // Optional token-budget proxy (intercepts Anthropic API calls)
+    if let Some(bp) = parse_budget_port() {
+        let budget_proxy = Arc::clone(&shared_budget);
+        tokio::spawn(async move {
+            if let Err(e) = token_proxy::start(budget_proxy, bp).await {
+                log::warn!("Token proxy failed: {e}");
             }
         });
     }
@@ -232,7 +271,7 @@ async fn async_main() -> anyhow::Result<()> {
                     }
                     // SAFETY: eBPF program writes a well-formed ExecEvent into the ring buf
                     let event = unsafe { (item.as_ptr() as *const ExecEvent).read_unaligned() };
-                    handle_event(event, &tool_db, &tracker, &reporter, &alert_store, &event_tx, &history);
+                    handle_event(event, &tool_db, &tracker, &reporter, &alert_store, &event_tx, &history, &siem_sender, &secret_store);
                 }
 
                 guard.clear_ready();
@@ -251,6 +290,8 @@ fn handle_event(
     alerts:   &SharedAlertStore,
     events:   &EventSender,
     history:  &SharedHistory,
+    siem:     &Mutex<SiemSender>,
+    secrets:  &SharedSecretStore,
 ) {
     let filename = c_str(&event.filename);
     let comm = c_str(&event.comm);
@@ -309,6 +350,72 @@ fn handle_event(
         working_dir: cwd,
     };
 
+    // ── Secret Proxy phase 1: file masking ─────────────────────────────────────
+    // File-reading commands on sensitive paths → inject masked content + kill.
+    if matches!(action.name, "cat"|"head"|"tail"|"grep"|"egrep"|"diff"|"cp"|"mv") {
+        let paths = secret_proxy::all_file_args(&ctx.args, ctx.working_dir.as_deref());
+        let secret_path = paths.iter().find(|p| secret_proxy::is_secret_path(p)).cloned();
+
+        if let Some(ref spath) = secret_path {
+            let mask_result = {
+                let mut store = secrets.lock().unwrap();
+                secret_proxy::mask_file(spath, &mut store)
+            };
+            match mask_result {
+                Ok((masked, count)) => {
+                    info!("[secret-proxy] Masking {count} secret(s) from {}", spath.display());
+                    let outcome = match secret_proxy::inject_and_terminate(event.pid, masked.as_bytes()) {
+                        Ok(()) => InspectOutcome::Alerted {
+                            threat_code: "SECRET_MASKED".to_string(),
+                            message: format!(
+                                "Masked {count} secret(s) from {} before delivering to agent",
+                                spath.display()
+                            ),
+                        },
+                        Err(e) => {
+                            warn!("[secret-proxy] inject failed ({e}), releasing process");
+                            send_signal(event.pid, libc::SIGCONT);
+                            InspectOutcome::Allowed
+                        }
+                    };
+                    emit_event(event.pid, action.name, &ctx.args, outcome, events, history);
+                    return;
+                }
+                Err(e) => {
+                    debug!("[secret-proxy] mask_file error for {}: {e}", spath.display());
+                    // fall through to normal validation
+                }
+            }
+        }
+    }
+
+    // ── Secret Proxy phase 2: outgoing request relay ───────────────────────────
+    // curl/wget with token args → re-run with real credentials, relay output.
+    if matches!(action.name, "curl" | "wget") {
+        if secret_proxy::args_have_tokens(&ctx.args) {
+            info!("[secret-proxy] Relaying {} with real credentials", action.name);
+            let outcome = {
+                let store = secrets.lock().unwrap();
+                match secret_proxy::relay_with_real_creds(event.pid, &ctx.args, &store) {
+                    Ok(()) => InspectOutcome::Alerted {
+                        threat_code: "SECRET_RELAYED".to_string(),
+                        message: format!(
+                            "Token credentials transparently substituted for {} request",
+                            action.name
+                        ),
+                    },
+                    Err(e) => {
+                        warn!("[secret-proxy] relay failed ({e}), releasing process");
+                        send_signal(event.pid, libc::SIGCONT);
+                        InspectOutcome::Allowed
+                    }
+                }
+            };
+            emit_event(event.pid, action.name, &ctx.args, outcome, events, history);
+            return;
+        }
+    }
+
     let outcome = match action.validate(&ctx) {
         ValidationResult::Allow => {
             info!("[{}] ALLOWED — resuming pid={}", action.name, event.pid);
@@ -317,6 +424,8 @@ fn handle_event(
         }
         ValidationResult::Warn(threat) => {
             reporter.warn(action.name, event.pid, &ctx.args, &threat);
+            siem.lock().unwrap().send_warn(
+                action.name, event.pid, &ctx.args, threat.code(), &threat.to_string());
             send_signal(event.pid, libc::SIGCONT);
             InspectOutcome::Warned {
                 threat_code: threat.code().to_string(),
@@ -325,6 +434,8 @@ fn handle_event(
         }
         ValidationResult::Block(threat) => {
             reporter.block(action.name, event.pid, &ctx.args, &threat);
+            siem.lock().unwrap().send_block(
+                action.name, event.pid, &ctx.args, threat.code(), &threat.to_string());
             send_signal(event.pid, libc::SIGKILL);
             send_signal(event.pid, libc::SIGCONT);
             InspectOutcome::Blocked {
@@ -342,6 +453,8 @@ fn handle_event(
                 ctx.pid,
             );
             reporter.warn(action.name, event.pid, &ctx.args, &threat);
+            siem.lock().unwrap().send_alert(
+                action.name, event.pid, &ctx.args, threat.code(), &threat.to_string());
             send_signal(event.pid, libc::SIGCONT);
             InspectOutcome::Alerted {
                 threat_code: threat.code().to_string(),
@@ -350,11 +463,22 @@ fn handle_event(
         }
     };
 
+    emit_event(event.pid, action.name, &ctx.args, outcome, events, history);
+}
+
+fn emit_event(
+    pid:     u32,
+    tool:    &str,
+    args:    &[String],
+    outcome: InspectOutcome,
+    events:  &EventSender,
+    history: &SharedHistory,
+) {
     let ev = event_bus::InspectEvent {
         ts_ms:   event_bus::now_ms(),
-        pid:     event.pid,
-        tool:    action.name.to_string(),
-        args:    ctx.args.clone(),
+        pid,
+        tool:    tool.to_string(),
+        args:    args.to_vec(),
         outcome,
     };
     event_bus::record(history, &ev);
@@ -372,7 +496,7 @@ fn looks_interesting(filename: &str) -> bool {
         "redis-cli",
         // Package managers (future rules)
         "npm", "pip", "pip3",
-        // Network / container (future rules)
+        // Network / container
         "curl", "wget", "docker", "kubectl",
         // Filesystem readers — watched when data policy has fblock/fmask rules
         "cat", "head", "tail", "grep", "egrep", "fgrep",

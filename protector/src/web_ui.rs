@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::{
     body::Body,
@@ -14,7 +14,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::alert_store::{AlertEntry, SharedAlertStore};
 use crate::auth::AuthState;
+use crate::budget::{BudgetConfig, SharedBudget, TaskSnapshot};
 use crate::rules_config::{RulesConfig, SharedRulesConfig};
+use crate::secret_proxy::{SecretSummary, SharedSecretStore};
+use crate::siem::SiemSender;
+use crate::siem_config::{SharedSiemConfig, SiemConfig};
 
 const CONFIG_PATH: &str = "rules.json";
 const SESSION_COOKIE: &str = "protector_session";
@@ -24,18 +28,26 @@ static LOGIN_HTML: &str = include_str!("web/login.html");
 
 #[derive(Clone)]
 struct AppState {
-    rules:  SharedRulesConfig,
-    auth:   Arc<AuthState>,
-    alerts: SharedAlertStore,
+    rules:   SharedRulesConfig,
+    auth:    Arc<AuthState>,
+    alerts:  SharedAlertStore,
+    siem:    SharedSiemConfig,
+    sender:  Arc<Mutex<SiemSender>>,
+    secrets: SharedSecretStore,
+    budget:  SharedBudget,
 }
 
 pub async fn start(
-    rules:  SharedRulesConfig,
-    auth:   Arc<AuthState>,
-    alerts: SharedAlertStore,
-    port:   u16,
+    rules:   SharedRulesConfig,
+    auth:    Arc<AuthState>,
+    alerts:  SharedAlertStore,
+    siem:    SharedSiemConfig,
+    sender:  Arc<Mutex<SiemSender>>,
+    secrets: SharedSecretStore,
+    budget:  SharedBudget,
+    port:    u16,
 ) -> anyhow::Result<()> {
-    let state = AppState { rules, auth, alerts };
+    let state = AppState { rules, auth, alerts, siem, sender, secrets, budget };
 
     let app = Router::new()
         // Protected routes
@@ -44,6 +56,13 @@ pub async fn start(
         .route("/api/rules/reset", post(reset_rules))
         .route("/api/alerts", get(get_alerts))
         .route("/api/alerts/clear", post(clear_alerts))
+        .route("/api/kill-agent", post(kill_agent))
+        .route("/api/siem", get(get_siem).post(set_siem))
+        .route("/api/siem/test", post(test_siem))
+        .route("/api/secrets", get(get_secrets))
+        .route("/api/secrets/clear", post(clear_secrets))
+        .route("/api/budget", get(get_budget).post(set_budget))
+        .route("/api/budget/reset", post(reset_budget))
         .route("/logout", post(do_logout))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         // Public routes
@@ -190,6 +209,145 @@ async fn get_alerts(
 
 async fn clear_alerts(State(state): State<AppState>) -> StatusCode {
     state.alerts.lock().unwrap().clear();
+    StatusCode::OK
+}
+
+// ── Kill agent ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct KillResult {
+    killed: Vec<u32>,
+}
+
+async fn kill_agent() -> Json<KillResult> {
+    let pids = find_claude_pids();
+    for &pid in &pids {
+        info!("kill-agent: sending SIGTERM to Claude pid={pid}");
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM); }
+    }
+    Json(KillResult { killed: pids })
+}
+
+fn find_claude_pids() -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir("/proc") else { return vec![]; };
+    let mut pids: Vec<u32> = entries
+        .flatten()
+        .filter_map(|e| e.file_name().to_string_lossy().parse::<u32>().ok())
+        .filter(|&pid| is_claude_proc(pid))
+        .collect();
+    pids.sort_unstable();
+    pids
+}
+
+fn is_claude_proc(pid: u32) -> bool {
+    if let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
+        let c = comm.trim().to_ascii_lowercase();
+        if c == "claude" || c.starts_with("claude") {
+            return true;
+        }
+    }
+    if let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) {
+        let s = raw
+            .split(|&b| b == 0)
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        if s.contains("claude")
+            || s.contains("@anthropic-ai/claude")
+            || s.contains("/.claude/")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+// ── SIEM API ──────────────────────────────────────────────────────────────────
+
+async fn get_siem(State(state): State<AppState>) -> Json<SiemConfig> {
+    Json(state.siem.read().unwrap().clone())
+}
+
+async fn set_siem(
+    State(state): State<AppState>,
+    Json(new): Json<SiemConfig>,
+) -> StatusCode {
+    *state.siem.write().unwrap() = new.clone();
+    match new.save() {
+        Ok(_)  => { info!("SIEM config saved"); StatusCode::OK }
+        Err(e) => { error!("save siem: {e}"); StatusCode::INTERNAL_SERVER_ERROR }
+    }
+}
+
+#[derive(Serialize)]
+struct TestResult {
+    ok:      bool,
+    message: String,
+}
+
+async fn test_siem(State(state): State<AppState>) -> Json<TestResult> {
+    let result = state.sender.lock().unwrap().send_test();
+    match result {
+        Ok(())  => Json(TestResult { ok: true,  message: "Test event sent".into() }),
+        Err(e)  => Json(TestResult { ok: false, message: e }),
+    }
+}
+
+// ── Secrets API ───────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct SecretsResponse {
+    count:   usize,
+    entries: Vec<SecretSummary>,
+}
+
+async fn get_secrets(State(state): State<AppState>) -> Json<SecretsResponse> {
+    let store = state.secrets.lock().unwrap();
+    Json(SecretsResponse {
+        count:   store.count(),
+        entries: store.summary(),
+    })
+}
+
+async fn clear_secrets(State(state): State<AppState>) -> StatusCode {
+    state.secrets.lock().unwrap().clear();
+    info!("Secret store cleared via web UI");
+    StatusCode::OK
+}
+
+// ── Budget API ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct BudgetResponse {
+    config:  BudgetConfig,
+    task:    TaskSnapshot,
+    history: Vec<TaskSnapshot>,
+}
+
+async fn get_budget(State(state): State<AppState>) -> Json<BudgetResponse> {
+    let b = state.budget.read().unwrap();
+    Json(BudgetResponse {
+        config:  b.config.clone(),
+        task:    b.task.clone(),
+        history: b.history.clone(),
+    })
+}
+
+async fn set_budget(
+    State(state): State<AppState>,
+    Json(new_config): Json<BudgetConfig>,
+) -> StatusCode {
+    state.budget.write().unwrap().config = new_config.clone();
+    match new_config.save() {
+        Ok(_)  => { info!("Budget config saved"); StatusCode::OK }
+        Err(e) => { error!("save budget: {e}"); StatusCode::INTERNAL_SERVER_ERROR }
+    }
+}
+
+async fn reset_budget(State(state): State<AppState>) -> StatusCode {
+    state.budget.write().unwrap().reset_task();
+    info!("Budget task reset via web UI");
     StatusCode::OK
 }
 

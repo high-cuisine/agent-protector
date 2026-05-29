@@ -52,6 +52,37 @@
   .btn:hover { background: var(--bg2); border-color: var(--accent); color: var(--accent); }
   .btn.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 700; }
   .btn.primary:hover { background: #79c0ff; }
+  .btn.danger  { border-color: var(--red); color: var(--red); }
+  .btn.danger:hover  { background: var(--red-d); border-color: var(--red); color: var(--red); }
+  .btn.danger-solid  { background: var(--red); color: #fff; border-color: var(--red); font-weight: 700; }
+  .btn.danger-solid:hover  { background: #c03030; }
+
+  /* ── Kill-agent modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.65); z-index: 500;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--bg2); border: 1px solid var(--red);
+    border-radius: 10px; padding: 28px 30px; max-width: 440px; width: 90%;
+    box-shadow: 0 8px 40px rgba(0,0,0,.6);
+  }
+  .modal-title {
+    font-size: 14px; font-weight: 700; color: var(--red);
+    display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+  }
+  .modal-body {
+    color: var(--text); font-size: 12px; line-height: 1.7; margin-bottom: 20px;
+  }
+  .modal-body strong { color: var(--red); }
+  .modal-warn {
+    background: var(--red-d); border: 1px solid var(--red);
+    border-radius: 6px; padding: 9px 12px; margin-bottom: 18px;
+    font-size: 11px; color: var(--red); line-height: 1.6;
+  }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
   /* ── Tabs ── */
   .tab-nav {
@@ -166,6 +197,117 @@
   .detail-args { color: var(--muted); margin-top: 6px; }
 
   .loading { text-align: center; padding: 48px 0; color: var(--muted); font-size: 11px; letter-spacing: .1em; }
+
+  /* ── SIEM pane ── */
+  #pane-siem { display: none; }
+  .siem-section { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px 22px; margin-bottom: 14px; }
+  .siem-section-title { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+  .siem-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .siem-row:last-child { margin-bottom: 0; }
+  .siem-label { width: 160px; flex-shrink: 0; font-size: 12px; color: var(--text); }
+  .siem-label small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .siem-input {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text); font-family: var(--font); font-size: 12px;
+    padding: 5px 10px; outline: none; transition: border-color .15s;
+  }
+  .siem-input:focus { border-color: var(--accent); }
+  .siem-input.wide { flex: 1; min-width: 0; }
+  .siem-input.short { width: 90px; }
+  select.siem-input { cursor: pointer; }
+  .siem-toggle-row { display: flex; align-items: center; gap: 12px; }
+  .siem-status { font-size: 11px; margin-left: 8px; }
+  .siem-status.ok  { color: var(--green); }
+  .siem-status.err { color: var(--red); }
+  .siem-actions { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
+  .siem-note { font-size: 10px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+
+  /* ── Secrets pane ── */
+  #pane-secrets { display: none; }
+  .secrets-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 16px;
+  }
+  .secrets-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .secrets-counter { font-size: 12px; color: var(--accent); font-weight: 600; }
+  .secrets-empty { text-align: center; padding: 48px 0; color: var(--muted); font-size: 12px; letter-spacing: .05em; }
+  .secrets-note {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 11px; color: var(--muted); line-height: 1.7;
+  }
+  .secrets-note strong { color: var(--text); }
+  .secrets-note code { color: var(--accent); background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
+  .secrets-table { width: 100%; border-collapse: collapse; }
+  .secrets-table th {
+    text-align: left; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border);
+  }
+  .secrets-table td {
+    font-size: 11px; padding: 6px 8px; border-bottom: 1px solid #161b22;
+    vertical-align: top;
+  }
+  .secrets-table tr:last-child td { border-bottom: none; }
+  .s-token { color: var(--accent); font-family: var(--font); font-size: 10px; letter-spacing: .04em; }
+  .s-key   { color: var(--text); }
+  .s-file  { color: var(--muted); font-size: 10px; word-break: break-all; }
+
+  /* ── Budget pane ── */
+  #pane-budget { display: none; }
+  .budget-note {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 11px; color: var(--muted); line-height: 1.8;
+  }
+  .budget-note strong { color: var(--text); }
+  .budget-note code { color: var(--accent); background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
+  .budget-section {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 20px; margin-bottom: 14px;
+  }
+  .budget-section-title {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px;
+  }
+  .budget-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .budget-row:last-child { margin-bottom: 0; }
+  .budget-label { width: 200px; flex-shrink: 0; font-size: 12px; color: var(--text); }
+  .budget-label small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .budget-input {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text); font-family: var(--font); font-size: 12px;
+    padding: 5px 10px; outline: none; transition: border-color .15s;
+  }
+  .budget-input:focus { border-color: var(--accent); }
+  .budget-input.short { width: 100px; }
+  .budget-add-row {
+    display: flex; gap: 8px; align-items: center; margin-top: 12px;
+    padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .budget-models-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+  .budget-models-table th {
+    text-align: left; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border);
+  }
+  .budget-models-table td {
+    font-size: 12px; padding: 7px 8px; border-bottom: 1px solid #161b22; vertical-align: middle;
+  }
+  .budget-models-table tr:last-child td { border-bottom: none; }
+  .bm-name  { color: var(--accent); font-weight: 600; }
+  .bm-limit { color: var(--text); }
+  .bm-unl   { color: var(--muted); font-style: italic; }
+  .budget-empty { color: var(--muted); font-size: 12px; padding: 12px 8px; }
+  /* Usage bars */
+  .usage-model { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .usage-model:last-child { border-bottom: none; margin-bottom: 0; }
+  .usage-model-name { color: var(--accent); font-weight: 600; font-size: 13px; margin-bottom: 10px; }
+  .usage-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .usage-bar-label { width: 52px; flex-shrink: 0; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .usage-bar-wrap { flex: 1; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .usage-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s; }
+  .usage-bar.over-limit { background: var(--red); }
+  .usage-bar-num { width: 180px; flex-shrink: 0; font-size: 11px; color: var(--muted); text-align: right; }
+  .budget-actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; }
+  #budget-status { font-size: 11px; margin-left: 4px; }
+  #budget-status.ok  { color: var(--green); }
+  #budget-status.err { color: var(--red); }
 </style>
 </head>
 <body>
@@ -176,6 +318,7 @@
     <span id="status"></span>
     <button class="btn" onclick="resetDefaults()">RESET DEFAULTS</button>
     <button class="btn primary" onclick="saveConfig()">SAVE</button>
+    <button class="btn danger" onclick="showKillModal()">⏹ KILL AGENT</button>
     <form method="post" action="/logout" style="margin:0">
       <button class="btn" type="submit">SIGN OUT</button>
     </form>
@@ -187,6 +330,11 @@
   <button class="tab" id="tab-alerts-btn" onclick="showTab('alerts')">
     Alerts<span class="badge" id="alert-badge" style="display:none">0</span>
   </button>
+  <button class="tab" id="tab-siem-btn" onclick="showTab('siem')">SIEM</button>
+  <button class="tab" id="tab-secrets-btn" onclick="showTab('secrets')">
+    Secrets<span class="badge" id="secrets-badge" style="display:none">0</span>
+  </button>
+  <button class="tab" id="tab-budget-btn" onclick="showTab('budget')">Budget</button>
 </div>
 
 <main>
@@ -203,7 +351,181 @@
       <div class="no-alerts">No alerts yet — the panel updates automatically.</div>
     </div>
   </div>
+
+  <div id="pane-secrets">
+    <div class="secrets-note">
+      <strong>Secret Proxy</strong> intercepts agent access to sensitive files
+      (<code>.env</code>, <code>kubeconfig</code>, <code>*.pem</code>, AWS/GCP credentials, …)
+      and replaces every secret value with a reversible token
+      <code>PROTECTOR_SECRET_&lt;hash&gt;</code> before the agent reads it.<br>
+      When the agent uses a token in an outgoing <code>curl</code>/<code>wget</code> request,
+      protector transparently substitutes the real credential and relays the response —
+      so the agent always works with tokens, never real secrets.
+    </div>
+
+    <div class="secrets-toolbar">
+      <span class="secrets-title">Active tokens — <span id="secrets-count" class="secrets-counter">0</span></span>
+      <button class="btn" onclick="clearSecrets()">CLEAR TOKENS</button>
+    </div>
+
+    <div id="secrets-list">
+      <div class="secrets-empty">No secrets masked yet — tokens appear here when the agent reads sensitive files.</div>
+    </div>
+  </div>
+
+  <div id="pane-budget">
+    <div class="budget-note">
+      <strong>Token Budget Enforcement</strong> — intercepts Anthropic API calls and stops the agent
+      when a per-model token limit is reached.<br>
+      Start protector with <code>--budget-port 8878</code>, then set
+      <code>ANTHROPIC_BASE_URL=http://127.0.0.1:8878</code> in Claude Code's environment.
+      Budgets reset automatically after the configured idle timeout (or manually via the button below).
+    </div>
+
+    <div class="budget-section">
+      <div class="budget-section-title">Auto-reset</div>
+      <div class="budget-row">
+        <span class="budget-label">Idle timeout (seconds)
+          <small>0 = never auto-reset between tasks</small>
+        </span>
+        <input type="number" id="budget-idle" class="budget-input short" min="0" placeholder="600"
+               oninput="budgetDirty()">
+      </div>
+    </div>
+
+    <div class="budget-section">
+      <div class="budget-section-title">Per-model token limits (0 = unlimited)</div>
+      <div id="budget-models-list">
+        <div class="budget-empty">No models configured yet.</div>
+      </div>
+      <div class="budget-add-row">
+        <input type="text"   id="bgt-new-model"  class="budget-input" style="flex:2;min-width:0"
+               placeholder="e.g. claude-sonnet-4-6" oninput="budgetDirty()">
+        <input type="number" id="bgt-new-input"  class="budget-input short" min="0" placeholder="Input limit">
+        <input type="number" id="bgt-new-output" class="budget-input short" min="0" placeholder="Output limit">
+        <button class="btn" onclick="addBudgetModel()">+ ADD</button>
+      </div>
+    </div>
+
+    <div class="budget-section">
+      <div class="budget-section-title">Current task usage</div>
+      <div id="budget-usage">
+        <div class="budget-empty">No usage recorded this task yet.</div>
+      </div>
+      <div class="budget-actions">
+        <button class="btn primary" onclick="saveBudget()">SAVE CONFIG</button>
+        <button class="btn danger"  onclick="resetBudgetTask()">RESET TASK COUNTERS</button>
+        <span id="budget-status"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="pane-siem">
+    <div class="siem-section">
+      <div class="siem-section-title">Connection</div>
+
+      <div class="siem-row">
+        <span class="siem-label">Enable SIEM forwarding</span>
+        <label class="toggle">
+          <input type="checkbox" id="siem-enabled" onchange="siemDirty()">
+          <span class="t-track"></span>
+        </label>
+      </div>
+
+      <div class="siem-row">
+        <span class="siem-label">
+          Host / IP
+          <small>SIEM or syslog collector</small>
+        </span>
+        <input class="siem-input wide" type="text" id="siem-host"
+               placeholder="192.168.1.100 or siem.corp.local" oninput="siemDirty()">
+      </div>
+
+      <div class="siem-row">
+        <span class="siem-label">Port</span>
+        <input class="siem-input short" type="number" id="siem-port"
+               min="1" max="65535" placeholder="514" oninput="siemDirty()">
+      </div>
+
+      <div class="siem-row">
+        <span class="siem-label">
+          Protocol
+          <small>UDP = fire-and-forget · TCP = reliable</small>
+        </span>
+        <div class="seg-group" style="width:140px">
+          <button class="seg seg-active seg-pass" id="proto-udp" onclick="setProto('udp')">UDP</button>
+          <button class="seg" id="proto-tcp" onclick="setProto('tcp')">TCP</button>
+        </div>
+      </div>
+
+      <div class="siem-row">
+        <span class="siem-label">
+          Syslog Facility
+          <small>RFC 3164 facility code</small>
+        </span>
+        <select class="siem-input" id="siem-facility" onchange="siemDirty()">
+          <option value="1">user (1)</option>
+          <option value="16">local0 (16)</option>
+          <option value="17">local1 (17)</option>
+          <option value="18">local2 (18)</option>
+          <option value="19">local3 (19)</option>
+          <option value="20">local4 (20)</option>
+          <option value="21">local5 (21)</option>
+          <option value="22">local6 (22)</option>
+          <option value="23">local7 (23)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="siem-section">
+      <div class="siem-section-title">Event Filter</div>
+
+      <div class="siem-row">
+        <span class="siem-label">
+          Minimum severity
+          <small>Events below threshold are dropped</small>
+        </span>
+        <select class="siem-input" id="siem-min-outcome" onchange="siemDirty()">
+          <option value="all">All events (Allow + Warn + Alert + Block)</option>
+          <option value="warn_and_above">Warn and above</option>
+          <option value="alert_and_above">Alert and above (recommended)</option>
+          <option value="block_only">Block only</option>
+        </select>
+      </div>
+
+      <p class="siem-note">
+        Events are forwarded as <strong>Syslog + CEF</strong> (ArcSight Common Event Format).<br>
+        Each blocked/alerted/warned action produces one CEF record with the threat code,
+        tool name, PID, and full command arguments in the extension fields.
+      </p>
+    </div>
+
+    <div class="siem-actions">
+      <button class="btn primary" onclick="saveSiem()">SAVE</button>
+      <button class="btn" onclick="testSiem()">SEND TEST EVENT</button>
+      <span class="siem-status" id="siem-status"></span>
+    </div>
+  </div>
 </main>
+
+<!-- Kill-agent confirmation modal -->
+<div class="modal-overlay" id="kill-modal" onclick="hideKillModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">⚠ Kill Agent Process</div>
+    <div class="modal-body">
+      This will send <strong>SIGTERM</strong> to all running Claude Code processes on this host.
+    </div>
+    <div class="modal-warn">
+      ⚠ &nbsp;<strong>Warning:</strong> The agent will be immediately terminated and any ongoing
+      task will be interrupted. You will need to <strong>start the agent again manually</strong>
+      after this action. Active sessions, unsaved context, and running subagents will be lost.
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="hideKillModal()">Cancel</button>
+      <button class="btn danger-solid" onclick="confirmKillAgent()">Yes, kill agent</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -410,14 +732,19 @@ async function resetDefaults() {
 
 function showTab(tab) {
   currentTab = tab;
-  document.getElementById('pane-rules').style.display   = tab === 'rules'  ? '' : 'none';
-  document.getElementById('pane-alerts').style.display  = tab === 'alerts' ? '' : 'none';
-  document.getElementById('tab-rules-btn').className  = 'tab' + (tab === 'rules'  ? ' active' : '');
-  document.getElementById('tab-alerts-btn').className = 'tab' + (tab === 'alerts' ? ' active' : '');
-  if (tab === 'alerts') {
-    unreadCount = 0;
-    updateBadge();
-  }
+  document.getElementById('pane-rules').style.display   = tab === 'rules'   ? '' : 'none';
+  document.getElementById('pane-alerts').style.display  = tab === 'alerts'  ? '' : 'none';
+  document.getElementById('pane-siem').style.display    = tab === 'siem'    ? '' : 'none';
+  document.getElementById('pane-secrets').style.display = tab === 'secrets' ? '' : 'none';
+  document.getElementById('pane-budget').style.display  = tab === 'budget'  ? '' : 'none';
+  document.getElementById('tab-rules-btn').className   = 'tab' + (tab === 'rules'   ? ' active' : '');
+  document.getElementById('tab-alerts-btn').className  = 'tab' + (tab === 'alerts'  ? ' active' : '');
+  document.getElementById('tab-siem-btn').className    = 'tab' + (tab === 'siem'    ? ' active' : '');
+  document.getElementById('tab-secrets-btn').className = 'tab' + (tab === 'secrets' ? ' active' : '');
+  document.getElementById('tab-budget-btn').className  = 'tab' + (tab === 'budget'  ? ' active' : '');
+  if (tab === 'alerts') { unreadCount = 0; updateBadge(); }
+  if (tab === 'secrets') loadSecrets();
+  if (tab === 'budget')  loadBudget();
 }
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
@@ -530,10 +857,319 @@ function showStatus(type, msg) {
   el._t = setTimeout(() => { el.className = ''; }, 3000);
 }
 
+// ── Secrets ───────────────────────────────────────────────────────────────────
+
+async function loadSecrets() {
+  try {
+    const r = await fetch('/api/secrets');
+    const data = await r.json();
+    renderSecrets(data);
+    updateSecretsBadge(data.count);
+  } catch(e) { /* silent */ }
+}
+
+function renderSecrets(data) {
+  document.getElementById('secrets-count').textContent = data.count;
+  const list = document.getElementById('secrets-list');
+  if (!data.entries || data.entries.length === 0) {
+    list.innerHTML = '<div class="secrets-empty">No secrets masked yet — tokens appear here when the agent reads sensitive files.</div>';
+    return;
+  }
+  const sorted = [...data.entries].sort((a, b) => a.key_name.localeCompare(b.key_name));
+  list.innerHTML = `
+    <table class="secrets-table">
+      <thead><tr>
+        <th>Token</th><th>Key name</th><th>Source file</th>
+      </tr></thead>
+      <tbody>
+        ${sorted.map(e => `
+          <tr>
+            <td><span class="s-token">${escHtml(e.token)}</span></td>
+            <td><span class="s-key">${escHtml(e.key_name)}</span></td>
+            <td><span class="s-file">${escHtml(e.source_file)}</span></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function clearSecrets() {
+  await fetch('/api/secrets/clear', { method: 'POST' });
+  renderSecrets({ count: 0, entries: [] });
+  updateSecretsBadge(0);
+}
+
+function updateSecretsBadge(count) {
+  const badge = document.getElementById('secrets-badge');
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : count;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Poll secrets count every 5 s to keep the badge updated
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/secrets');
+    const data = await r.json();
+    updateSecretsBadge(data.count);
+    document.getElementById('secrets-count').textContent = data.count;
+    if (currentTab === 'secrets') renderSecrets(data);
+  } catch(e) {}
+}, 5000);
+
+// ── SIEM ──────────────────────────────────────────────────────────────────────
+
+let siemChanged = false;
+
+async function loadSiem() {
+  const r = await fetch('/api/siem');
+  const cfg = await r.json();
+  document.getElementById('siem-enabled').checked = cfg.enabled;
+  document.getElementById('siem-host').value       = cfg.host || '';
+  document.getElementById('siem-port').value       = cfg.port || 514;
+  document.getElementById('siem-facility').value   = cfg.facility ?? 16;
+  document.getElementById('siem-min-outcome').value = cfg.min_outcome || 'alert_and_above';
+  setProto(cfg.protocol || 'udp', false);
+  siemChanged = false;
+}
+
+function siemDirty() { siemChanged = true; }
+
+function setProto(p, dirty = true) {
+  const udp = document.getElementById('proto-udp');
+  const tcp = document.getElementById('proto-tcp');
+  if (p === 'udp') {
+    udp.className = 'seg seg-active seg-pass';
+    tcp.className = 'seg';
+  } else {
+    udp.className = 'seg';
+    tcp.className = 'seg seg-active seg-pass';
+  }
+  udp._active = (p === 'udp');
+  if (dirty) siemDirty();
+}
+
+function siemPayload() {
+  return {
+    enabled:     document.getElementById('siem-enabled').checked,
+    host:        document.getElementById('siem-host').value.trim(),
+    port:        parseInt(document.getElementById('siem-port').value) || 514,
+    protocol:    document.getElementById('proto-udp')._active ? 'udp' : 'tcp',
+    facility:    parseInt(document.getElementById('siem-facility').value) || 16,
+    min_outcome: document.getElementById('siem-min-outcome').value,
+  };
+}
+
+async function saveSiem() {
+  const r = await fetch('/api/siem', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(siemPayload()),
+  });
+  setSiemStatus(r.ok, r.ok ? '✓ Saved' : '✗ Save failed');
+  if (r.ok) siemChanged = false;
+}
+
+async function testSiem() {
+  setSiemStatus(null, '⟳ Sending…');
+  // Auto-save first so daemon uses current form values
+  if (siemChanged) await saveSiem();
+  const r = await fetch('/api/siem/test', { method: 'POST' });
+  const data = await r.json();
+  setSiemStatus(data.ok, data.ok ? '✓ Test event sent' : '✗ ' + data.message);
+}
+
+function setSiemStatus(ok, msg) {
+  const el = document.getElementById('siem-status');
+  el.textContent = msg;
+  el.className = 'siem-status' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+  if (ok !== null) {
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.textContent = ''; el.className = 'siem-status'; }, 4000);
+  }
+}
+
+// ── Kill agent ────────────────────────────────────────────────────────────────
+
+function showKillModal() {
+  document.getElementById('kill-modal').classList.add('visible');
+}
+
+function hideKillModal(e) {
+  if (e && e.target !== document.getElementById('kill-modal')) return;
+  document.getElementById('kill-modal').classList.remove('visible');
+}
+
+async function confirmKillAgent() {
+  document.getElementById('kill-modal').classList.remove('visible');
+  try {
+    const r = await fetch('/api/kill-agent', { method: 'POST' });
+    const data = await r.json();
+    if (data.killed.length > 0) {
+      showStatus('err', `⏹ Killed ${data.killed.length} process${data.killed.length > 1 ? 'es' : ''}`);
+    } else {
+      showStatus('ok', '⏹ No agent processes found');
+    }
+  } catch(e) {
+    showStatus('err', '✗ Kill failed');
+  }
+}
+
+// ── Budget ────────────────────────────────────────────────────────────────────
+
+let budgetModels = {};   // { modelName: { input_tokens, output_tokens } }
+let budgetIdle   = 600;
+let budgetDirtyFlag = false;
+
+function budgetDirty() { budgetDirtyFlag = true; }
+
+async function loadBudget() {
+  try {
+    const r    = await fetch('/api/budget');
+    const data = await r.json();
+    budgetModels   = data.config.models || {};
+    budgetIdle     = data.config.idle_reset_secs ?? 600;
+    budgetDirtyFlag = false;
+    document.getElementById('budget-idle').value = budgetIdle;
+    renderBudgetModels();
+    renderBudgetUsage(data.config, data.task);
+  } catch(e) { /* silent */ }
+}
+
+function renderBudgetModels() {
+  const el = document.getElementById('budget-models-list');
+  const entries = Object.entries(budgetModels);
+  if (entries.length === 0) {
+    el.innerHTML = '<div class="budget-empty">No models configured yet. Add one below.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <table class="budget-models-table">
+      <thead><tr>
+        <th>Model</th>
+        <th>Input token limit</th>
+        <th>Output token limit</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${entries.map(([name, lim]) => `
+          <tr>
+            <td><span class="bm-name">${escHtml(name)}</span></td>
+            <td>${lim.input_tokens  > 0 ? `<span class="bm-limit">${lim.input_tokens.toLocaleString()}</span>` : '<span class="bm-unl">unlimited</span>'}</td>
+            <td>${lim.output_tokens > 0 ? `<span class="bm-limit">${lim.output_tokens.toLocaleString()}</span>` : '<span class="bm-unl">unlimited</span>'}</td>
+            <td><button class="btn" style="padding:2px 8px;font-size:10px" onclick="removeBudgetModel('${esc(name)}')">✕</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderBudgetUsage(config, task) {
+  const el    = document.getElementById('budget-usage');
+  const usage = task.usage || {};
+  const models = Object.keys(usage);
+  if (models.length === 0) {
+    el.innerHTML = '<div class="budget-empty">No usage recorded this task yet.</div>';
+    return;
+  }
+  el.innerHTML = models.map(model => {
+    const u   = usage[model];
+    const lim = (config.models || {})[model] || {};
+    const inp_pct  = lim.input_tokens  > 0 ? Math.min(100, u.input_tokens  / lim.input_tokens  * 100) : 0;
+    const out_pct  = lim.output_tokens > 0 ? Math.min(100, u.output_tokens / lim.output_tokens * 100) : 0;
+    const inp_over = lim.input_tokens  > 0 && u.input_tokens  >= lim.input_tokens;
+    const out_over = lim.output_tokens > 0 && u.output_tokens >= lim.output_tokens;
+    const inpLim   = lim.input_tokens  > 0 ? ` / ${lim.input_tokens.toLocaleString()}`  : '';
+    const outLim   = lim.output_tokens > 0 ? ` / ${lim.output_tokens.toLocaleString()}` : '';
+    return `
+      <div class="usage-model">
+        <div class="usage-model-name">${escHtml(model)}
+          <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">${u.calls} call${u.calls===1?'':'s'}</span>
+        </div>
+        <div class="usage-bar-row">
+          <span class="usage-bar-label">Input</span>
+          <div class="usage-bar-wrap"><div class="usage-bar${inp_over?' over-limit':''}" style="width:${lim.input_tokens>0?inp_pct:0}%"></div></div>
+          <span class="usage-bar-num">${u.input_tokens.toLocaleString()}${inpLim}</span>
+        </div>
+        <div class="usage-bar-row">
+          <span class="usage-bar-label">Output</span>
+          <div class="usage-bar-wrap"><div class="usage-bar${out_over?' over-limit':''}" style="width:${lim.output_tokens>0?out_pct:0}%"></div></div>
+          <span class="usage-bar-num">${u.output_tokens.toLocaleString()}${outLim}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function addBudgetModel() {
+  const name = document.getElementById('bgt-new-model').value.trim();
+  if (!name) return;
+  const inp = parseInt(document.getElementById('bgt-new-input').value)  || 0;
+  const out = parseInt(document.getElementById('bgt-new-output').value) || 0;
+  budgetModels[name] = { input_tokens: inp, output_tokens: out };
+  document.getElementById('bgt-new-model').value  = '';
+  document.getElementById('bgt-new-input').value  = '';
+  document.getElementById('bgt-new-output').value = '';
+  budgetDirtyFlag = true;
+  renderBudgetModels();
+}
+
+function removeBudgetModel(name) {
+  delete budgetModels[name];
+  budgetDirtyFlag = true;
+  renderBudgetModels();
+}
+
+function budgetPayload() {
+  return {
+    models:          budgetModels,
+    idle_reset_secs: parseInt(document.getElementById('budget-idle').value) || 0,
+  };
+}
+
+async function saveBudget() {
+  const r = await fetch('/api/budget', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(budgetPayload()),
+  });
+  setBudgetStatus(r.ok, r.ok ? '✓ Saved' : '✗ Error');
+  if (r.ok) budgetDirtyFlag = false;
+}
+
+async function resetBudgetTask() {
+  const r = await fetch('/api/budget/reset', { method: 'POST' });
+  if (r.ok) {
+    setBudgetStatus(true, '✓ Task counters reset');
+    loadBudget();
+  } else {
+    setBudgetStatus(false, '✗ Reset failed');
+  }
+}
+
+function setBudgetStatus(ok, msg) {
+  const el = document.getElementById('budget-status');
+  el.textContent = msg;
+  el.className = ok ? 'ok' : 'err';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; el.className = ''; }, 3500);
+}
+
+// Refresh usage every 5 s when budget tab is open
+setInterval(async () => {
+  if (currentTab !== 'budget') return;
+  try {
+    const r    = await fetch('/api/budget');
+    const data = await r.json();
+    renderBudgetUsage(data.config, data.task);
+  } catch(e) {}
+}, 5000);
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 loadConfig();
 loadAlerts();
+loadSiem();
 setInterval(pollAlerts, 2000);
 </script>
 </body>

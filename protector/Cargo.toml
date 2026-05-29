@@ -10,6 +10,9 @@ protector-common = { path = "../protector-common", features = ["user"] }
 
 anyhow = { workspace = true, default-features = true }
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "form", "query", "tokio", "macros"] }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
 bcrypt = { workspace = true }
 aya = { workspace = true }
 aya-log = { workspace = true }

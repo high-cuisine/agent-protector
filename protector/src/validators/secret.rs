@@ -51,7 +51,7 @@ impl Default for SecretScanner {
             ("DB / cache URL with creds (env)", r"(?i)(DATABASE_URL|REDIS_URL|MONGO_URI|POSTGRES_URL|MYSQL_URL)\s*=\s*\S+://\S+"),
             ("Generic API Key",           r#"(?i)(api[_\-]?key|apikey)\s*[=:]\s*['"]?[A-Za-z0-9/_\-]{20,}"#),
             ("Generic Secret/Password",   r#"(?i)(secret|password|passwd|pwd|token)\s*[=:]\s*['"]\S{8,}['"]"#),
-            /// Same as quoted form, but many configs/tools use bare values (INI, env snippets).
+            // Same as quoted form, but many configs/tools use bare values (INI, env snippets).
             ("Generic Secret (unquoted)", r"(?i)\b(secret|password|passwd|pwd|token)\s*=\s*\S{8,}"),
             ("High-entropy hex string",   r"\b[0-9a-f]{32,}\b"),
         ];
