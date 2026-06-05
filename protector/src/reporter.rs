@@ -210,19 +210,41 @@ fn resolve_report_dir() -> PathBuf {
     if let Ok(d) = std::env::var("PROTECTOR_REPORT_DIR") {
         return PathBuf::from(d);
     }
-    if unsafe { libc::geteuid() == 0 } {
-        return PathBuf::from("/var/log/protector");
+    #[cfg(unix)]
+    {
+        if unsafe { libc::geteuid() == 0 } {
+            return PathBuf::from("/var/log/protector");
+        }
+        return std::env::var("XDG_STATE_HOME")
+            .map(|d| PathBuf::from(d).join("protector"))
+            .unwrap_or_else(|_| PathBuf::from("/tmp/protector"));
     }
-    std::env::var("XDG_STATE_HOME")
-        .map(|d| PathBuf::from(d).join("protector"))
-        .unwrap_or_else(|_| PathBuf::from("/tmp/protector"))
+    #[cfg(windows)]
+    {
+        std::env::var("ProgramData")
+            .map(|d| PathBuf::from(d).join("Protector").join("reports"))
+            .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData\Protector\reports"))
+    }
+}
+
+#[cfg(unix)]
+unsafe fn local_tm(t: libc::time_t) -> libc::tm {
+    let mut tm: libc::tm = std::mem::zeroed();
+    libc::localtime_r(&t, &mut tm);
+    tm
+}
+
+#[cfg(windows)]
+unsafe fn local_tm(t: libc::time_t) -> libc::tm {
+    let mut tm: libc::tm = std::mem::zeroed();
+    libc::localtime_s(&mut tm, &t);
+    tm
 }
 
 fn now() -> String {
     unsafe {
         let t = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&t, &mut tm);
+        let tm = local_tm(t);
         format!(
             "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
             tm.tm_year + 1900,

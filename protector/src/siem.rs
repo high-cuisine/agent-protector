@@ -170,11 +170,24 @@ fn cef_ext(s: &str) -> String {
      .replace('\r', "")
 }
 
+#[cfg(unix)]
+unsafe fn local_tm(t: libc::time_t) -> libc::tm {
+    let mut tm: libc::tm = std::mem::zeroed();
+    libc::localtime_r(&t, &mut tm);
+    tm
+}
+
+#[cfg(windows)]
+unsafe fn local_tm(t: libc::time_t) -> libc::tm {
+    let mut tm: libc::tm = std::mem::zeroed();
+    libc::localtime_s(&mut tm, &t);
+    tm
+}
+
 fn syslog_ts() -> String {
     unsafe {
         let t = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&t, &mut tm);
+        let tm = local_tm(t);
         let mon = ["Jan","Feb","Mar","Apr","May","Jun",
                    "Jul","Aug","Sep","Oct","Nov","Dec"]
             .get(tm.tm_mon as usize).unwrap_or(&"Jan");
