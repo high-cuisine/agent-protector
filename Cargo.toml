@@ -5,6 +5,8 @@ members = [
     "protector-common",
     "protector-ebpf",
     "proxy-injector",
+    "protector-win",
+    "shim",
 ]
 default-members = ["protector", "protector-common", "proxy-injector"]
 

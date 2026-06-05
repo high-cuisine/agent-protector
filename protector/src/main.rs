@@ -137,8 +137,26 @@ fn main() {
         });
 }
 
+/// Switch to a stable config directory so relative-path config files
+/// (rules.json, admin.passwd, policy.conf, …) are found regardless of the
+/// daemon's launch CWD (systemd units often start at `/`).
+fn enter_config_dir() {
+    if let Ok(custom) = std::env::var("PROTECTOR_CONFIG_DIR") {
+        if !custom.is_empty() && std::env::set_current_dir(&custom).is_ok() {
+            info!("Config directory: {custom}");
+            return;
+        }
+    }
+    let etc = std::path::Path::new("/etc/protector");
+    if etc.is_dir() && std::env::set_current_dir(etc).is_ok() {
+        info!("Config directory: /etc/protector");
+    }
+    // Otherwise keep the existing CWD (developer/local runs).
+}
+
 async fn async_main() -> anyhow::Result<()> {
     env_logger::init();
+    enter_config_dir();
 
     // Required for older kernels without memcg-based eBPF memory accounting
     let rlim = libc::rlimit {
@@ -432,6 +450,17 @@ fn handle_event(
     // curl/wget with token args → re-run with real credentials, relay output.
     if matches!(action.name, "curl" | "wget") {
         if secret_proxy::args_have_tokens(&ctx.args) {
+            // SECURITY: only substitute real credentials for allowlisted hosts,
+            // otherwise an agent could exfiltrate secrets to an attacker URL.
+            if !relay_allowed(&ctx.args) {
+                warn!("[secret-proxy] relay denied for {} — destination not in PROTECTOR_RELAY_ALLOWLIST", action.name);
+                send_signal(event.pid, libc::SIGCONT);
+                emit_event(event.pid, action.name, &ctx.args, InspectOutcome::Warned {
+                    threat_code: "SECRET_RELAY_DENIED".to_string(),
+                    message: "Outbound destination not allowlisted; real credentials NOT substituted".to_string(),
+                }, events, history);
+                return;
+            }
             info!("[secret-proxy] Relaying {} with real credentials", action.name);
             let outcome = {
                 let store = secrets.lock().unwrap();
@@ -500,6 +529,17 @@ fn handle_event(
                 message:     threat.to_string(),
             }
         }
+        // MaskedOutput is only returned by protector-win's validators (shim-based).
+        // On Linux, treat it as Block to be safe (should never fire in practice).
+        ValidationResult::MaskedOutput { threat, .. } => {
+            reporter.block(action.name, event.pid, &ctx.args, &threat);
+            send_signal(event.pid, libc::SIGKILL);
+            send_signal(event.pid, libc::SIGCONT);
+            InspectOutcome::Blocked {
+                threat_code: threat.code().to_string(),
+                message:     threat.to_string(),
+            }
+        }
     };
 
     emit_event(event.pid, action.name, &ctx.args, outcome, events, history);
@@ -522,6 +562,49 @@ fn emit_event(
     };
     event_bus::record(history, &ev);
     let _ = events.send(ev);
+}
+
+/// Returns true only if real credentials may be substituted into this outbound
+/// request, i.e. every URL host in `args` matches `PROTECTOR_RELAY_ALLOWLIST`
+/// (comma-separated host suffixes).  Empty/unset allowlist ⇒ deny (fail safe).
+fn relay_allowed(args: &[String]) -> bool {
+    let allow_raw = std::env::var("PROTECTOR_RELAY_ALLOWLIST").unwrap_or_default();
+    let allow: Vec<String> = allow_raw
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if allow.is_empty() {
+        return false;
+    }
+    let hosts = extract_hosts(args);
+    if hosts.is_empty() {
+        return false;
+    }
+    hosts.iter().all(|h| {
+        allow.iter().any(|a| h == a || h.ends_with(&format!(".{a}")))
+    })
+}
+
+/// Extract lowercased host names from any URL-looking arguments.
+fn extract_hosts(args: &[String]) -> Vec<String> {
+    let mut hosts = Vec::new();
+    for a in args {
+        for scheme in ["http://", "https://"] {
+            if let Some(rest) = a.find(scheme).map(|i| &a[i + scheme.len()..]) {
+                let after_at = rest.rsplit('@').next().unwrap_or(rest);
+                let host: String = after_at
+                    .chars()
+                    .take_while(|&c| c != '/' && c != ':' && c != '?' && c != '#')
+                    .collect();
+                let host = host.trim().to_ascii_lowercase();
+                if !host.is_empty() {
+                    hosts.push(host);
+                }
+            }
+        }
+    }
+    hosts
 }
 
 /// Quick pre-filter: only pass events that could match something in ToolDb.

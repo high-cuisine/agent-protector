@@ -16,6 +16,10 @@ pub enum ValidationResult {
     Warn(ThreatError),
     /// The action is allowed; threat is logged to the web alert panel.
     Alert { threat: ThreatError, rule: String },
+    /// Shim-based masking (Windows): block original command, deliver synthetic
+    /// output back to the shim over the named-pipe IPC channel.
+    /// Never returned by Linux validators — exists so both crates share the type.
+    MaskedOutput { content: String, threat: ThreatError },
 }
 
 pub trait Validator: Send + Sync {

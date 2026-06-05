@@ -226,6 +226,7 @@ struct KillResult {
     killed: Vec<u32>,
 }
 
+#[cfg(unix)]
 async fn kill_agent() -> Json<KillResult> {
     let pids = find_claude_pids();
     for &pid in &pids {
@@ -235,6 +236,7 @@ async fn kill_agent() -> Json<KillResult> {
     Json(KillResult { killed: pids })
 }
 
+#[cfg(unix)]
 fn find_claude_pids() -> Vec<u32> {
     let Ok(entries) = std::fs::read_dir("/proc") else { return vec![]; };
     let mut pids: Vec<u32> = entries
@@ -246,6 +248,7 @@ fn find_claude_pids() -> Vec<u32> {
     pids
 }
 
+#[cfg(unix)]
 fn is_claude_proc(pid: u32) -> bool {
     if let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
         let c = comm.trim().to_ascii_lowercase();
@@ -268,6 +271,65 @@ fn is_claude_proc(pid: u32) -> bool {
         }
     }
     false
+}
+
+#[cfg(windows)]
+async fn kill_agent() -> Json<KillResult> {
+    let pids = find_claude_pids();
+    for &pid in &pids {
+        info!("kill-agent: taskkill pid={pid}");
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .status();
+    }
+    Json(KillResult { killed: pids })
+}
+
+#[cfg(windows)]
+fn find_claude_pids() -> Vec<u32> {
+    let output = match std::process::Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return vec![],
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut pids = Vec::new();
+    for line in text.lines() {
+        // tasklist CSV is quoted; the Memory column contains commas
+        // ("12,345 K"), so a naive split(',') is wrong — parse quoted fields.
+        let fields = parse_csv_line(line);
+        if fields.len() >= 2 {
+            let name = fields[0].to_ascii_lowercase();
+            if name.contains("claude") {
+                if let Ok(pid) = fields[1].trim().parse::<u32>() {
+                    pids.push(pid);
+                }
+            }
+        }
+    }
+    pids.sort_unstable();
+    pids
+}
+
+/// Minimal RFC-4180-ish parser for a single CSV line with quoted fields.
+#[cfg(windows)]
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if in_quotes && chars.peek() == Some(&'"') => { cur.push('"'); chars.next(); }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => { fields.push(std::mem::take(&mut cur)); }
+            _ => cur.push(c),
+        }
+    }
+    fields.push(cur);
+    fields
 }
 
 // ── SIEM API ──────────────────────────────────────────────────────────────────

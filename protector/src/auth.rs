@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 pub struct AuthState {
@@ -77,10 +76,14 @@ fn load_hash() -> String {
     hash
 }
 
+/// Cryptographically secure, cross-platform session token.
+///
+/// Uses the OS CSPRNG via `getrandom` (Linux: getrandom(2)/`/dev/urandom`,
+/// Windows: BCryptGenRandom).  A failure here is fatal: we must NEVER fall back
+/// to a predictable token, or the web UI auth could be trivially bypassed.
 fn random_token() -> String {
     let mut buf = [0u8; 32];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut buf);
-    }
+    getrandom::getrandom(&mut buf)
+        .expect("OS CSPRNG unavailable — refusing to issue a predictable session token");
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }

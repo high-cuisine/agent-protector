@@ -87,6 +87,7 @@ impl ConfiguredValidator {
             ValidationResult::Allow => return result,
             ValidationResult::Block(t) | ValidationResult::Warn(t) => t.clone(),
             ValidationResult::Alert { .. } => return result,
+            ValidationResult::MaskedOutput { .. } => return result,
         };
 
         let rule = Self::rule_for_threat(&threat);
