@@ -117,7 +117,17 @@ impl ProcessTracker {
             self.ppid_cache.insert(pid, ppid);
             self.exe_cache.insert(pid, exe.clone());
 
-            if is_claude_exe(&exe) {
+            // Match on image name first (cheap), then fall back to the command
+            // line — Claude Code installed via npm runs under a generic host
+            // (`node.exe`) whose *name* is not "claude"; only its command line
+            // (the `claude-code` cli path) reveals it.  Skip our own daemon to
+            // avoid ever flagging it via an incidental path match.
+            let is_claude = is_claude_exe(&exe)
+                || (pid != std::process::id()
+                    && crate::win_util::process_command_line(pid)
+                        .map(|c| c.to_ascii_lowercase().contains("claude"))
+                        .unwrap_or(false));
+            if is_claude {
                 self.claude_pids.insert(pid);
             }
 

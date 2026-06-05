@@ -74,3 +74,102 @@ pub fn pipe_client_pid<H: std::os::windows::io::AsRawHandle>(server: &H) -> Opti
 pub fn pipe_client_pid<H>(_server: &H) -> Option<u32> {
     None
 }
+
+/// Read a process's full command line straight from its PEB.
+///
+/// Why this exists: Claude Code frequently runs under a *generic host* image
+/// (e.g. `node.exe` for the npm install) whose **name** gives no hint that it
+/// is Claude.  Matching on the image name alone (`claude*`) misses those, so
+/// the daemon never recognises the agent and validates nothing.  The command
+/// line — which contains the `claude-code` cli path — is the reliable signal.
+///
+/// Returns `None` if the process can't be opened or its memory can't be read
+/// (access denied, already exited, cross-bitness edge cases).  Best-effort.
+#[cfg(windows)]
+pub fn process_command_line(pid: u32) -> Option<String> {
+    use std::ffi::c_void;
+
+    use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PEB, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_VM_READ, RTL_USER_PROCESS_PARAMETERS,
+    };
+
+    // SAFETY: every pointer handed to ReadProcessMemory is read-checked (the
+    // returned byte count must equal the requested length), the handle is closed
+    // on every path, and all structs are zero-initialised before being filled.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+
+        let read_mem = |addr: *const c_void, buf: *mut c_void, len: usize| -> bool {
+            let mut got: usize = 0;
+            ReadProcessMemory(handle, addr, buf, len, &mut got) != 0 && got == len
+        };
+
+        let result = (|| {
+            // 1. Locate the PEB via NtQueryInformationProcess(ProcessBasicInformation).
+            let mut pbi: PROCESS_BASIC_INFORMATION = std::mem::zeroed();
+            let mut ret_len: u32 = 0;
+            let status = NtQueryInformationProcess(
+                handle,
+                ProcessBasicInformation,
+                &mut pbi as *mut _ as *mut c_void,
+                std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                &mut ret_len,
+            );
+            if status != 0 || pbi.PebBaseAddress.is_null() {
+                return None;
+            }
+
+            // 2. Read the PEB → ProcessParameters pointer.
+            let mut peb: PEB = std::mem::zeroed();
+            if !read_mem(
+                pbi.PebBaseAddress as *const c_void,
+                &mut peb as *mut _ as *mut c_void,
+                std::mem::size_of::<PEB>(),
+            ) || peb.ProcessParameters.is_null()
+            {
+                return None;
+            }
+
+            // 3. Read RTL_USER_PROCESS_PARAMETERS → CommandLine (UNICODE_STRING).
+            let mut params: RTL_USER_PROCESS_PARAMETERS = std::mem::zeroed();
+            if !read_mem(
+                peb.ProcessParameters as *const c_void,
+                &mut params as *mut _ as *mut c_void,
+                std::mem::size_of::<RTL_USER_PROCESS_PARAMETERS>(),
+            ) {
+                return None;
+            }
+
+            let bytes = params.CommandLine.Length as usize; // UTF-16 byte length
+            if bytes == 0 || params.CommandLine.Buffer.is_null() || bytes > 64 * 1024 {
+                return None;
+            }
+
+            // 4. Read the UTF-16 command-line buffer itself.
+            let mut buf: Vec<u16> = vec![0u16; bytes / 2];
+            if !read_mem(
+                params.CommandLine.Buffer as *const c_void,
+                buf.as_mut_ptr() as *mut c_void,
+                bytes,
+            ) {
+                return None;
+            }
+            Some(String::from_utf16_lossy(&buf))
+        })();
+
+        CloseHandle(handle);
+        result
+    }
+}
+
+#[cfg(not(windows))]
+pub fn process_command_line(_pid: u32) -> Option<String> {
+    None
+}

@@ -287,49 +287,29 @@ async fn kill_agent() -> Json<KillResult> {
 
 #[cfg(windows)]
 fn find_claude_pids() -> Vec<u32> {
-    let output = match std::process::Command::new("tasklist")
-        .args(["/FO", "CSV", "/NH"])
+    // Match on the command line as well as the image name: Claude Code installed
+    // via npm runs under a generic host (`node.exe`) whose *name* is not
+    // "claude", so a name-only `tasklist` match misses it entirely.  CIM exposes
+    // CommandLine; `-ne $PID` drops this query's own PowerShell from the results.
+    let script = "Get-CimInstance Win32_Process | \
+                  Where-Object { ($_.CommandLine -match 'claude' -or $_.Name -match 'claude') \
+                  -and $_.ProcessId -ne $PID } | \
+                  ForEach-Object { $_.ProcessId }";
+    let output = match std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
     {
         Ok(o) => o,
         Err(_) => return vec![],
     };
     let text = String::from_utf8_lossy(&output.stdout);
-    let mut pids = Vec::new();
-    for line in text.lines() {
-        // tasklist CSV is quoted; the Memory column contains commas
-        // ("12,345 K"), so a naive split(',') is wrong — parse quoted fields.
-        let fields = parse_csv_line(line);
-        if fields.len() >= 2 {
-            let name = fields[0].to_ascii_lowercase();
-            if name.contains("claude") {
-                if let Ok(pid) = fields[1].trim().parse::<u32>() {
-                    pids.push(pid);
-                }
-            }
-        }
-    }
+    let mut pids: Vec<u32> = text
+        .lines()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .collect();
     pids.sort_unstable();
+    pids.dedup();
     pids
-}
-
-/// Minimal RFC-4180-ish parser for a single CSV line with quoted fields.
-#[cfg(windows)]
-fn parse_csv_line(line: &str) -> Vec<String> {
-    let mut fields = Vec::new();
-    let mut cur = String::new();
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' if in_quotes && chars.peek() == Some(&'"') => { cur.push('"'); chars.next(); }
-            '"' => in_quotes = !in_quotes,
-            ',' if !in_quotes => { fields.push(std::mem::take(&mut cur)); }
-            _ => cur.push(c),
-        }
-    }
-    fields.push(cur);
-    fields
 }
 
 // ── SIEM API ──────────────────────────────────────────────────────────────────
