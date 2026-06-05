@@ -876,12 +876,12 @@ async function resetDefaults() {
 
 function showTab(tab) {
   currentTab = tab;
-  document.getElementById('pane-rules').style.display   = tab === 'rules'   ? '' : 'none';
-  document.getElementById('pane-alerts').style.display  = tab === 'alerts'  ? '' : 'none';
-  document.getElementById('pane-siem').style.display    = tab === 'siem'    ? '' : 'none';
-  document.getElementById('pane-secrets').style.display = tab === 'secrets' ? '' : 'none';
-  document.getElementById('pane-budget').style.display   = tab === 'budget'   ? '' : 'none';
-  document.getElementById('pane-firewall').style.display = tab === 'firewall' ? '' : 'none';
+  document.getElementById('pane-rules').style.display   = tab === 'rules'   ? 'block' : 'none';
+  document.getElementById('pane-alerts').style.display  = tab === 'alerts'  ? 'block' : 'none';
+  document.getElementById('pane-siem').style.display    = tab === 'siem'    ? 'block' : 'none';
+  document.getElementById('pane-secrets').style.display = tab === 'secrets' ? 'block' : 'none';
+  document.getElementById('pane-budget').style.display   = tab === 'budget'   ? 'block' : 'none';
+  document.getElementById('pane-firewall').style.display = tab === 'firewall' ? 'block' : 'none';
   document.getElementById('tab-rules-btn').className    = 'tab' + (tab === 'rules'    ? ' active' : '');
   document.getElementById('tab-alerts-btn').className   = 'tab' + (tab === 'alerts'   ? ' active' : '');
   document.getElementById('tab-siem-btn').className     = 'tab' + (tab === 'siem'     ? ' active' : '');
