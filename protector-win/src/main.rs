@@ -126,6 +126,8 @@ fn main() {
 
     match args.get(1).map(String::as_str) {
         Some("setup") => {
+            // setup writes HKLM PATH + registers a service — needs admin.
+            win_util::ensure_elevated();
             if let Err(e) = setup::run() {
                 eprintln!("setup: {e:#}");
                 std::process::exit(1);
@@ -144,6 +146,12 @@ fn main() {
         }
         _ => {}
     }
+
+    // Running the daemon needs admin: process enumeration across sessions,
+    // reading other processes' command lines, and named-pipe enforcement.
+    // When launched as a Windows service (LocalSystem) this is already true and
+    // ensure_elevated() is a no-op.
+    win_util::ensure_elevated();
 
     banner::print_banner();
 

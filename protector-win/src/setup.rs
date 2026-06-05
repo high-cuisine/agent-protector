@@ -51,9 +51,11 @@ pub fn run() -> anyhow::Result<()> {
     prepend_path(&shim_dir)?;
 
     println!("\nSetup complete.");
-    println!("  Start daemon : sc start Protector");
+    println!("  Service      : Protector (auto-start on boot, running now)");
+    println!("  Manage       : sc stop Protector | sc start Protector | sc query Protector");
     println!("  Web dashboard: http://127.0.0.1:7878");
     println!("  Shim dir     : {SHIM_DIR}  (prepended to system PATH)");
+    println!("\nOpen a NEW terminal/agent session so the updated PATH takes effect.");
     Ok(())
 }
 
@@ -75,7 +77,19 @@ fn install_service(daemon_path: &PathBuf) -> anyhow::Result<()> {
     if !status.success() {
         anyhow::bail!("sc create failed — are you running as Administrator?");
     }
-    println!("Windows service 'Protector' registered.");
+    println!("Windows service 'Protector' registered (start=auto, runs on every boot).");
+
+    // Start it now so the user doesn't have to reboot or start it manually.
+    let started = std::process::Command::new("sc")
+        .args(["start", "Protector"])
+        .status();
+    match started {
+        Ok(s) if s.success() => println!("Windows service 'Protector' started."),
+        _ => println!(
+            "Note: could not auto-start the service now — start it with `sc start Protector` \
+             (it will also start automatically on the next boot)."
+        ),
+    }
     Ok(())
 }
 

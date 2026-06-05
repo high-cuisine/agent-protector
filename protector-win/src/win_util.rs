@@ -173,3 +173,95 @@ pub fn process_command_line(pid: u32) -> Option<String> {
 pub fn process_command_line(_pid: u32) -> Option<String> {
     None
 }
+
+// ── Privilege elevation (UAC) ─────────────────────────────────────────────────
+
+/// Is the current process running with an elevated (administrator) token?
+#[cfg(windows)]
+pub fn is_elevated() -> bool {
+    use std::ffi::c_void;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    // SAFETY: the token handle is closed on every path; the buffer matches the
+    // size we declare to GetTokenInformation.
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut ret_len: u32 = 0;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut c_void,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        );
+        CloseHandle(token);
+        ok != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+/// If not already elevated, relaunch this exact process (same args) through the
+/// shell with the `runas` verb — which raises the UAC prompt — then exit the
+/// current, non-elevated instance.  Returns normally only when already elevated.
+///
+/// The Windows service path (LocalSystem) is already elevated, so this is a
+/// no-op there; it only matters for interactive launches.
+#[cfg(windows)]
+pub fn ensure_elevated() {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+    if is_elevated() {
+        return;
+    }
+
+    let Ok(exe) = std::env::current_exe() else { return };
+
+    // Re-quote argv (skip argv[0]) so paths with spaces survive the round-trip.
+    let params = std::env::args()
+        .skip(1)
+        .map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let to_wide = |s: &std::ffi::OsStr| -> Vec<u16> {
+        s.encode_wide().chain(std::iter::once(0)).collect()
+    };
+    let wexe = to_wide(exe.as_os_str());
+    let wverb: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();
+    let wparams: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
+
+    eprintln!("Requesting administrator privileges (UAC)…");
+
+    // SAFETY: all string pointers are NUL-terminated and outlive the call.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            wverb.as_ptr(),
+            wexe.as_ptr(),
+            if params.is_empty() { std::ptr::null() } else { wparams.as_ptr() },
+            std::ptr::null(),
+            1, // SW_NORMAL
+        )
+    };
+
+    // ShellExecuteW returns a value > 32 on success.  If the user declined the
+    // UAC prompt (or it failed), fall through so the caller can report the
+    // missing-privilege error itself rather than silently exiting.
+    if (result as isize) > 32 {
+        std::process::exit(0);
+    }
+    eprintln!("Elevation was declined or failed — continuing without admin rights.");
+}
+
+#[cfg(not(windows))]
+pub fn ensure_elevated() {}
