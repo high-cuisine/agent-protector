@@ -23,6 +23,11 @@ protector [OPTIONS] [SUBCOMMAND]
 Subcommands:
   setup                  Install binary + systemd/launchd service
   inspect                Stream live events from running daemon (Unix socket)
+  run -- <prog> [args]   Launch <prog> (e.g. claude) under seccomp control:
+                         installs the user-notif filter on itself, hands the
+                         listener fd to the running daemon, then execve's the
+                         program — full secret-substitution from syscall #1, no
+                         kill/relaunch, no MITM-proxy coupling. (Linux only)
 
 Flags:
   --config-port <port>   Web dashboard port (default 7878)
@@ -131,7 +136,8 @@ For mask cases, the daemon kills the process and injects synthetic output into i
 | `data_policy.rs` | `DataPolicy` parser: `block`/`mask` (SQL tables), `fblock`/`fmask` (FS paths) |
 | `secret_proxy.rs` | Two-phase secret isolation: file masking + curl/wget relay with real credentials |
 | `read_guard.rs` | fanotify `FAN_OPEN_PERM` backstop: kernel-denies reads of policy/agent-cwd secret files by Claude descendants — closes the in-process read bypass (`python -c open('.env')`) that tool-level masking can't cover. Deny-only; daemon's own reads (relay) allowed. **(Linux only)** |
-| `seccomp_notify.rs` | seccomp user-notif supervisor: receives a listener fd from `proxy-injector` (SCM_RIGHTS) and, for trapped `open`/`openat`/`openat2` of sensitive paths, **substitutes** a `memfd` of masked content via `SECCOMP_IOCTL_NOTIF_ADDFD` — the agent reads tokens instead of the real file. Non-sensitive opens → `CONTINUE`; failures → `ENOENT`. **(Linux only)** |
+| `seccomp_notify.rs` | seccomp user-notif supervisor: receives a listener fd from `proxy-injector` or `protector run` (SCM_RIGHTS) and, for trapped `open`/`openat`/`openat2` of sensitive paths, **substitutes** a `memfd` of masked content via `SECCOMP_IOCTL_NOTIF_ADDFD` — the agent reads tokens instead of the real file. Non-sensitive opens → `CONTINUE`; failures → `ENOENT`. **(Linux only)** |
+| `run.rs` | `protector run -- <prog>`: installs the seccomp user-notif filter on itself, hands the listener fd to the daemon, then `execve`s `<prog>` (e.g. claude). Launches the agent directly under control — preferred over `proxy-injector` when you start the agent yourself. **(Linux only)** |
 | `fs_guard.rs` → `validators/fs_guard.rs` | FS path guard using `DataPolicy` |
 | `data_guard.rs` → `validators/data_guard.rs` | SQL table guard — rewrites queries to mask columns |
 | `network_firewall.rs` | L3/L4 firewall via iptables + cgroup v2 (`/sys/fs/cgroup/claude-protector`) |

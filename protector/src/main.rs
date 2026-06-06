@@ -19,6 +19,7 @@ mod inspect;
 mod network_firewall;
 mod read_guard;
 mod reporter;
+mod run;
 mod seccomp_notify;
 mod rules_config;
 mod secret_proxy;
@@ -122,6 +123,14 @@ fn main() {
                 std::process::exit(1);
             }
             return;
+        }
+        Some("run") => {
+            // Everything after `run` (skipping an optional `--`) is the command.
+            let mut rest: Vec<String> = args.iter().skip(2).cloned().collect();
+            if rest.first().map(String::as_str) == Some("--") {
+                rest.remove(0);
+            }
+            run::exec(&rest); // installs seccomp on self, then execve — never returns
         }
         _ => {}
     }
