@@ -59,8 +59,8 @@ Protector is a Rust workspace with six crates that together form a kernel-usersp
 
 - **`protector-ebpf`** — eBPF tracepoint attached to `sys_enter_execve`; captures pid, uid, comm, and filename into a 256 KB ring buffer. Runs in kernel space. **(Linux only)**
 - **`protector-common`** — Shared `ExecEvent` struct used by both the eBPF program and the userspace daemon.
-- **`protector`** — Main userspace daemon (Linux): loads the eBPF object, reads events from the ring buffer, validates commands, and kills or resumes processes.
-- **`proxy-injector`** — Standalone CLI that finds running Claude Code instances via `/proc` scanning and restarts them with MITM proxy env vars injected.
+- **`protector`** — Main userspace daemon (Linux): loads the eBPF object, reads events from the ring buffer, validates commands, kills or resumes processes, and runs the secret-protection layers (`read_guard` fanotify deny + `seccomp_notify` substitution). Also provides the `protector run` launcher.
+- **`proxy-injector`** — Standalone CLI that finds running Claude Code instances via `/proc` scanning and restarts them with MITM proxy env vars injected **and** a seccomp user-notif filter installed (for secret substitution). For starting the agent yourself, prefer `protector run` (see below).
 - **`protector-win`** — Windows daemon. Same validators/policy/web-UI as `protector`, but interception is shim-based (no eBPF). Talks to shims over a named pipe. **(Windows only)**
 - **`shim`** — Tiny wrapper executable installed as `git.exe`, `psql.exe`, … in a directory placed first in PATH. Forwards each invocation to `protector-win` and acts on the verdict (run / block / synthetic output).
 
@@ -75,6 +75,11 @@ Security properties of the Windows IPC (hardened):
 - `setup` reads/writes the system PATH defensively and refuses to write an empty value (which would wipe PATH).
 
 **Known limitation (by design):** the wrapper approach only covers tools invoked *by name through PATH*. A process that calls a tool by absolute path, ships its own PATH, or statically links the client logic bypasses the shim entirely. This is a weaker guarantee than the Linux eBPF path. Document/threat-model accordingly.
+
+Operational details (Windows):
+- **Agent detection** is by **command line**, not image name: Claude Code installed via npm runs under `node.exe` whose *name* is not "claude". `tracker.rs::process_command_line()` reads the target's PEB (`NtQueryInformationProcess` → `ReadProcessMemory`); a process counts as Claude if the exe name matches `claude*` **or** its command line contains `claude`. The web-UI kill-agent uses the same command-line match (CIM `Win32_Process`). Matching on image name alone misses npm installs entirely (the daemon would validate nothing).
+- **Privilege:** `protector-win` and `setup` **self-elevate via UAC** (`win_util::ensure_elevated()` re-launches through `ShellExecute "runas"` when not already admin). Under the LocalSystem service this is a no-op.
+- **Auto-start:** `setup` registers the `Protector` Windows service (`start=auto`) **and starts it immediately** (`sc start`), so it runs in the background without a reboot.
 
 The credential **relay** (secret-proxy phase 2) substitutes real secrets into outbound `curl`/`wget` only when every URL host is in `PROTECTOR_RELAY_ALLOWLIST` (comma-separated host suffixes). Unset/empty ⇒ deny — this is the anti-exfiltration guard and applies on **both** platforms.
 
@@ -188,7 +193,26 @@ The agent context window never contains real credentials. Tokens are determinist
 
 **Limitation & backstop:** masking only works for *watched tools* whose stdout the daemon rewrites. An agent reading a secret **in-process** (`python -c "open('.env').read()"`, `node -e …`, or a custom binary) bypasses it. On Linux this is closed by `read_guard.rs` (fanotify `FAN_OPEN_PERM`): reads of policy-protected paths (`fblock`/`fmask`) and of sensitive files in each agent's cwd are **denied at the kernel** for Claude descendants, regardless of which program issues the `open()`. It is deny-only (fanotify can't substitute content); the daemon's own reads for the relay are exempt. On Windows there is no equivalent — the shim is observability/best-effort, and real enforcement requires a sandbox/container.
 
-**Substitution (not just deny):** when the agent is launched through `proxy-injector`, the launcher installs a seccomp user-notification filter (`SECCOMP_RET_USER_NOTIF` on open/openat/openat2, `NO_NEW_PRIVS`, inherited by the whole tree) and hands the listener fd to the daemon (`seccomp_notify.rs`) over a Unix socket. The supervisor traps each open, reads the target path from `/proc/<pid>/mem`, and for sensitive paths injects a `memfd` of masked content as the syscall result (`SECCOMP_IOCTL_NOTIF_ADDFD` + `FLAG_SEND`) — so `python -c "open('.env').read()"` gets *tokens*, not denial, and the agent keeps working. Failsafes: bad/oversized/erroring reads → `ENOENT`; if the daemon dies the kernel auto-fails trapped opens (no hang). Caveat: `CONTINUE` on non-sensitive paths carries the documented seccomp-notify TOCTOU window. This path requires kernel ≥ 5.14 (ADDFD `FLAG_SEND`); the fanotify deny remains the backstop for agents not started via the launcher.
+**Substitution (not just deny):** when the agent is launched through `proxy-injector` or `protector run`, the launcher installs a seccomp user-notification filter (`SECCOMP_RET_USER_NOTIF` on open/openat/openat2, `NO_NEW_PRIVS`, inherited by the whole tree) and hands the listener fd to the daemon (`seccomp_notify.rs`) over a Unix socket. The supervisor traps each open, reads the target path from `/proc/<pid>/mem`, and for sensitive paths injects a `memfd` of masked content as the syscall result (`SECCOMP_IOCTL_NOTIF_ADDFD` + `FLAG_SEND`) — so `python -c "open('.env').read()"` gets *tokens*, not denial, and the agent keeps working. Failsafes: bad/oversized/erroring reads → `ENOENT`; if the daemon dies the kernel auto-fails trapped opens (no hang). Caveat: `CONTINUE` on non-sensitive paths carries the documented seccomp-notify TOCTOU window. This path requires kernel ≥ 5.14 (ADDFD `FLAG_SEND`); the fanotify deny remains the backstop for agents not started via the launcher.
+
+### Secret-protection layers (Linux), from weakest to strongest
+
+| Layer | Covers | Mechanism | Agent sees |
+|-------|--------|-----------|------------|
+| `secret_proxy` tool masking | `cat`/`head`/`grep`/… of sensitive files | execve interception + stdout rewrite | masked output |
+| `read_guard` (fanotify) | **any** reader (python/node/custom) of policy/cwd secrets | `FAN_OPEN_PERM` deny | `EPERM` |
+| `seccomp_notify` substitution | **any** reader, when launched via a launcher | seccomp user-notif + `memfd` ADDFD | **tokens** (keeps working) |
+
+`read_guard` is always on (for any Claude descendant); `seccomp_notify` additionally applies to agents started through `protector run` / `proxy-injector`. Tokens from any layer resolve to the real secret only in the **phase-2 relay** for allowlisted outbound hosts.
+
+## Launching the agent under control (Linux)
+
+Two ways to get an agent under seccomp secret-substitution:
+
+- **`protector run -- claude [args]`** (preferred when you start the agent): installs the filter on its own process, hands the listener fd to the daemon, then `execve`s the program by absolute path — controlled from syscall #1, no kill/relaunch, no proxy coupling. Alias it: `alias claude='protector run -- claude'`. Run it **as the user** (not root) so the agent isn't elevated; the daemon must already be running.
+- **`proxy-injector`** (to capture an already-running Claude): finds running instances, kills and relaunches them with the filter installed **and** MITM-proxy env injected (so it needs the proxy up, e.g. `--proxy-port`).
+
+The handoff socket is `/run/protector-seccomp.sock` (override with `PROTECTOR_SECCOMP_SOCK`); the daemon chmods it `0666` so an unprivileged launcher can connect.
 
 ## Network Firewall
 
