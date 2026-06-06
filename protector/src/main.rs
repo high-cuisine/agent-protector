@@ -19,6 +19,7 @@ mod inspect;
 mod network_firewall;
 mod read_guard;
 mod reporter;
+mod seccomp_notify;
 mod rules_config;
 mod secret_proxy;
 mod setup;
@@ -258,6 +259,19 @@ async fn async_main() -> anyhow::Result<()> {
     read_guard::start(
         Arc::clone(&guard_policy),
         Arc::clone(&tracker),
+        event_tx.clone(),
+        Arc::clone(&history),
+        Arc::clone(&alert_store),
+        Arc::clone(&siem_sender),
+    );
+
+    // Seccomp user-notif supervisor: substitute masked content for in-process
+    // secret reads by agents launched through proxy-injector (which installs the
+    // filter and hands us the listener fd).  Complements read_guard's deny path.
+    #[cfg(target_os = "linux")]
+    seccomp_notify::start(
+        Arc::clone(&guard_policy),
+        Arc::clone(&secret_store),
         event_tx.clone(),
         Arc::clone(&history),
         Arc::clone(&alert_store),

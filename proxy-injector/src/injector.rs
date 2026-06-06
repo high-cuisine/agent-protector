@@ -131,7 +131,39 @@ impl ProxyInjector {
             cmd.env("CURL_CA_BUNDLE",      ca_str.as_ref());
         }
 
-        cmd.spawn()
+        // ── seccomp secret substitution ───────────────────────────────────────
+        // If the daemon is listening, install a seccomp user-notif filter on the
+        // new process tree before execve so the daemon can substitute masked
+        // content for in-process reads of sensitive files.  Best-effort: when
+        // the daemon isn't reachable the agent launches normally.
+        #[cfg(target_os = "linux")]
+        let _handoff = {
+            use std::os::unix::process::CommandExt;
+            match crate::seccomp::prepare() {
+                Some(h) => {
+                    let sock_fd = h.sock_fd();
+                    let addr    = h.filter_addr();
+                    let len     = h.filter_len();
+                    // SAFETY: child_install only issues async-signal-safe raw
+                    // syscalls and never allocates.
+                    unsafe {
+                        cmd.pre_exec(move || {
+                            crate::seccomp::child_install(sock_fd, addr, len);
+                            Ok(())
+                        });
+                    }
+                    Some(h)
+                }
+                None => None,
+            }
+        };
+
+        let child = cmd.spawn();
+        // Keep the handoff (socket + filter program) alive until after the fork
+        // in spawn() has run pre_exec, then drop it.
+        #[cfg(target_os = "linux")]
+        drop(_handoff);
+        child
     }
 }
 

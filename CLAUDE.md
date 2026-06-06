@@ -131,6 +131,7 @@ For mask cases, the daemon kills the process and injects synthetic output into i
 | `data_policy.rs` | `DataPolicy` parser: `block`/`mask` (SQL tables), `fblock`/`fmask` (FS paths) |
 | `secret_proxy.rs` | Two-phase secret isolation: file masking + curl/wget relay with real credentials |
 | `read_guard.rs` | fanotify `FAN_OPEN_PERM` backstop: kernel-denies reads of policy/agent-cwd secret files by Claude descendants — closes the in-process read bypass (`python -c open('.env')`) that tool-level masking can't cover. Deny-only; daemon's own reads (relay) allowed. **(Linux only)** |
+| `seccomp_notify.rs` | seccomp user-notif supervisor: receives a listener fd from `proxy-injector` (SCM_RIGHTS) and, for trapped `open`/`openat`/`openat2` of sensitive paths, **substitutes** a `memfd` of masked content via `SECCOMP_IOCTL_NOTIF_ADDFD` — the agent reads tokens instead of the real file. Non-sensitive opens → `CONTINUE`; failures → `ENOENT`. **(Linux only)** |
 | `fs_guard.rs` → `validators/fs_guard.rs` | FS path guard using `DataPolicy` |
 | `data_guard.rs` → `validators/data_guard.rs` | SQL table guard — rewrites queries to mask columns |
 | `network_firewall.rs` | L3/L4 firewall via iptables + cgroup v2 (`/sys/fs/cgroup/claude-protector`) |
@@ -180,6 +181,8 @@ Column mask kinds: `redact` → `[REDACTED]`, `email` → `a***@***.***`, `phone
 The agent context window never contains real credentials. Tokens are deterministic (hash-based), so the same secret always gets the same token within a daemon session.
 
 **Limitation & backstop:** masking only works for *watched tools* whose stdout the daemon rewrites. An agent reading a secret **in-process** (`python -c "open('.env').read()"`, `node -e …`, or a custom binary) bypasses it. On Linux this is closed by `read_guard.rs` (fanotify `FAN_OPEN_PERM`): reads of policy-protected paths (`fblock`/`fmask`) and of sensitive files in each agent's cwd are **denied at the kernel** for Claude descendants, regardless of which program issues the `open()`. It is deny-only (fanotify can't substitute content); the daemon's own reads for the relay are exempt. On Windows there is no equivalent — the shim is observability/best-effort, and real enforcement requires a sandbox/container.
+
+**Substitution (not just deny):** when the agent is launched through `proxy-injector`, the launcher installs a seccomp user-notification filter (`SECCOMP_RET_USER_NOTIF` on open/openat/openat2, `NO_NEW_PRIVS`, inherited by the whole tree) and hands the listener fd to the daemon (`seccomp_notify.rs`) over a Unix socket. The supervisor traps each open, reads the target path from `/proc/<pid>/mem`, and for sensitive paths injects a `memfd` of masked content as the syscall result (`SECCOMP_IOCTL_NOTIF_ADDFD` + `FLAG_SEND`) — so `python -c "open('.env').read()"` gets *tokens*, not denial, and the agent keeps working. Failsafes: bad/oversized/erroring reads → `ENOENT`; if the daemon dies the kernel auto-fails trapped opens (no hang). Caveat: `CONTINUE` on non-sensitive paths carries the documented seccomp-notify TOCTOU window. This path requires kernel ≥ 5.14 (ADDFD `FLAG_SEND`); the fanotify deny remains the backstop for agents not started via the launcher.
 
 ## Network Firewall
 
