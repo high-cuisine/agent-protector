@@ -130,6 +130,7 @@ For mask cases, the daemon kills the process and injects synthetic output into i
 | `rules_config.rs` | Per-tool/per-rule actions (`Pass`/`Alert`/`Block`), persisted to `rules.json` |
 | `data_policy.rs` | `DataPolicy` parser: `block`/`mask` (SQL tables), `fblock`/`fmask` (FS paths) |
 | `secret_proxy.rs` | Two-phase secret isolation: file masking + curl/wget relay with real credentials |
+| `read_guard.rs` | fanotify `FAN_OPEN_PERM` backstop: kernel-denies reads of policy/agent-cwd secret files by Claude descendants — closes the in-process read bypass (`python -c open('.env')`) that tool-level masking can't cover. Deny-only; daemon's own reads (relay) allowed. **(Linux only)** |
 | `fs_guard.rs` → `validators/fs_guard.rs` | FS path guard using `DataPolicy` |
 | `data_guard.rs` → `validators/data_guard.rs` | SQL table guard — rewrites queries to mask columns |
 | `network_firewall.rs` | L3/L4 firewall via iptables + cgroup v2 (`/sys/fs/cgroup/claude-protector`) |
@@ -177,6 +178,8 @@ Column mask kinds: `redact` → `[REDACTED]`, `email` → `a***@***.***`, `phone
 **Phase 2 — request relay**: when `curl`/`wget` is called with token-containing args, the daemon re-runs the command with tokens replaced by real credentials, captures output, and relays it back through the stopped process's stdout pipe.
 
 The agent context window never contains real credentials. Tokens are deterministic (hash-based), so the same secret always gets the same token within a daemon session.
+
+**Limitation & backstop:** masking only works for *watched tools* whose stdout the daemon rewrites. An agent reading a secret **in-process** (`python -c "open('.env').read()"`, `node -e …`, or a custom binary) bypasses it. On Linux this is closed by `read_guard.rs` (fanotify `FAN_OPEN_PERM`): reads of policy-protected paths (`fblock`/`fmask`) and of sensitive files in each agent's cwd are **denied at the kernel** for Claude descendants, regardless of which program issues the `open()`. It is deny-only (fanotify can't substitute content); the daemon's own reads for the relay are exempt. On Windows there is no equivalent — the shim is observability/best-effort, and real enforcement requires a sandbox/container.
 
 ## Network Firewall
 

@@ -98,6 +98,12 @@ impl FsRule {
         let p = path.to_string_lossy();
         glob_match(&self.expanded, &p)
     }
+
+    /// The `~`-expanded pattern (e.g. `/home/u/.ssh/id_*`).  Used by the
+    /// fanotify read-guard to derive concrete files to mark.
+    pub fn expanded(&self) -> &str {
+        &self.expanded
+    }
 }
 
 // ── DataPolicy ────────────────────────────────────────────────────────────────
@@ -120,6 +126,11 @@ impl DataPolicy {
     /// Return the first filesystem rule that covers `path`, if any.
     pub fn find_fs_rule(&self, path: &Path) -> Option<&FsRule> {
         self.fs_rules.iter().find(|r| r.matches(path))
+    }
+
+    /// All filesystem rules (fblock/fmask).  Used by the fanotify read-guard.
+    pub fn fs_rules(&self) -> &[FsRule] {
+        &self.fs_rules
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Arc<Self>> {

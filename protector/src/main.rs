@@ -17,6 +17,7 @@ mod event_bus;
 mod firewall_config;
 mod inspect;
 mod network_firewall;
+mod read_guard;
 mod reporter;
 mod rules_config;
 mod secret_proxy;
@@ -185,6 +186,8 @@ async fn async_main() -> anyhow::Result<()> {
     let mut async_fd = AsyncFd::new(ring_buf)?;
 
     let policy       = DataPolicy::load_default();
+    // Kept for the fanotify read-guard before `policy` is moved into ToolDb.
+    let guard_policy = Arc::clone(&policy);
     let rules_config = Arc::new(std::sync::RwLock::new(
         rules_config::RulesConfig::load_or_default("rules.json"),
     ));
@@ -248,6 +251,18 @@ async fn async_main() -> anyhow::Result<()> {
             }
         });
     }
+
+    // Fanotify read-guard: deny in-process reads (python/node/custom binaries)
+    // of policy-protected files by Claude descendants — closes the secret-proxy
+    // bypass that tool-level masking can't cover.
+    read_guard::start(
+        Arc::clone(&guard_policy),
+        Arc::clone(&tracker),
+        event_tx.clone(),
+        Arc::clone(&history),
+        Arc::clone(&alert_store),
+        Arc::clone(&siem_sender),
+    );
 
     let config_port  = parse_config_port();
     let auth_state   = Arc::new(auth::AuthState::load());
