@@ -522,6 +522,17 @@
     </div>
 
     <div class="fw-section">
+      <div class="fw-section-title">Egress allowlist — hostnames kept reachable under default-deny (whitelist mode)</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <input type="checkbox" id="fw-allow-dns" onchange="fwDirty()">
+        <span>Allow outbound DNS (port 53) so the agent can resolve these hosts</span>
+      </label>
+      <textarea id="fw-allow-hosts" class="fw-input" rows="3" style="width:100%;resize:vertical"
+                placeholder="One hostname per line, e.g.&#10;api.anthropic.com" oninput="fwDirty()"></textarea>
+      <div class="fw-default-policy">Each host's current IPs are resolved every 30&nbsp;s and allowed for egress; loopback and established replies are allowed; everything else (including all IPv6) is dropped.</div>
+    </div>
+
+    <div class="fw-section">
       <div class="fw-section-title">Rules — matched in order, first match wins</div>
 
       <div id="fw-rules-list">
@@ -1321,6 +1332,8 @@ async function loadFirewall() {
     const r = await fetch('/api/firewall');
     fwConfig = await r.json();
     document.getElementById('fw-enabled').checked = fwConfig.enabled;
+    document.getElementById('fw-allow-dns').checked = fwConfig.allow_dns !== false;
+    document.getElementById('fw-allow-hosts').value = (fwConfig.allow_hosts || []).join('\n');
     setFwMode(fwConfig.mode, false);
     renderFwRules();
   } catch(e) { /* silent */ }
@@ -1429,6 +1442,9 @@ function moveFwRule(idx, delta) {
 
 async function saveFirewall() {
   fwConfig.enabled = document.getElementById('fw-enabled').checked;
+  fwConfig.allow_dns = document.getElementById('fw-allow-dns').checked;
+  fwConfig.allow_hosts = document.getElementById('fw-allow-hosts').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
   const r = await fetch('/api/firewall', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },

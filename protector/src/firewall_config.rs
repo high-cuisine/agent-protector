@@ -80,6 +80,8 @@ impl Default for FirewallRule {
     }
 }
 
+fn default_true() -> bool { true }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FirewallConfig {
@@ -88,6 +90,14 @@ pub struct FirewallConfig {
     pub rules: Vec<FirewallRule>,
     /// Monotonic counter — incremented by the UI each time a rule is added.
     pub next_id: u64,
+    /// Hostnames allowlisted for egress in whitelist mode. Their **currently
+    /// resolved** IPs are kept in an ipset and refreshed on a timer, so CDN
+    /// backends with rotating IPs (e.g. `api.anthropic.com`) keep working.
+    pub allow_hosts: Vec<String>,
+    /// Allow outbound DNS (port 53) in whitelist mode so the agent can resolve
+    /// `allow_hosts`. Note: DNS is itself a (low-bandwidth) exfil channel.
+    #[serde(default = "default_true")]
+    pub allow_dns: bool,
 }
 
 impl Default for FirewallConfig {
@@ -97,6 +107,28 @@ impl Default for FirewallConfig {
             mode: FirewallMode::Blacklist,
             rules: Vec::new(),
             next_id: 1,
+            allow_hosts: Vec::new(),
+            allow_dns: true,
+        }
+    }
+}
+
+impl FirewallConfig {
+    /// A ready-to-use default-deny egress policy: drop everything outbound from
+    /// the agent except DNS, loopback, established replies, and the resolved IPs
+    /// of `hosts` (defaults to the Anthropic API). IPv6 egress is dropped wholesale.
+    pub fn egress_deny(hosts: Vec<String>) -> Self {
+        Self {
+            enabled: true,
+            mode: FirewallMode::Whitelist,
+            rules: Vec::new(),
+            next_id: 1,
+            allow_hosts: if hosts.is_empty() {
+                vec!["api.anthropic.com".to_string()]
+            } else {
+                hosts
+            },
+            allow_dns: true,
         }
     }
 }

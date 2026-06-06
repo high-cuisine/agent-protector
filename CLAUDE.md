@@ -216,7 +216,7 @@ The handoff socket is `/run/protector-seccomp.sock` (override with `PROTECTOR_SE
 
 ## Network Firewall
 
-Requires: root, `iptables` with `xt_cgroup`/`xt_conntrack` modules, cgroup v2.
+Requires: root, `iptables` with `xt_cgroup`/`xt_conntrack` modules, cgroup v2. Host-allowlist egress additionally needs `ipset` + `xt_set` (and `ip6tables` for the IPv6 drop).
 
 Config: `firewall.json`. Two modes:
 - **Blacklist** (default): allow all, explicit DROP rules.
@@ -225,6 +225,21 @@ Config: `firewall.json`. Two modes:
 Rules support: CIDR, port range, direction (`in`/`out`/`both`), protocol (`tcp`/`udp`/`any`), enable/disable per rule.
 
 Implementation: creates `PROTECTOR-FW-OUT` and `PROTECTOR-FW-IN` chains, jumps from OUTPUT/INPUT only for processes in the `/sys/fs/cgroup/claude-protector` cgroup. Rules are hot-reloaded from the web UI without restarting the daemon.
+
+### Egress default-deny (anti-exfiltration)
+
+The complement to secret protection: even a secret the agent *did* read can't leave. In **whitelist** mode the agent's egress is default-DROP, with baseline allows that keep it functional without opening an exfil path:
+- loopback (`-o lo`) and ESTABLISHED/RELATED replies;
+- DNS (port 53) — toggle `allow_dns` (note: DNS is itself a low-bandwidth exfil channel);
+- the **host allowlist** — `allow_hosts` (e.g. `api.anthropic.com`) are resolved to their current IPv4s and kept in the `protector-allow` **ipset**; a resolver thread re-resolves every 30 s and swaps the set atomically, so rotating CDN backends keep working with no flush window;
+- **all IPv6 egress is dropped** (the ipset path is IPv4-only) to prevent a v6 bypass.
+
+`FirewallConfig::egress_deny(hosts)` builds a ready-made policy (defaults to `api.anthropic.com`). Configure via the web UI (Firewall tab → Egress allowlist) or `firewall.json`:
+```json
+{ "enabled": true, "mode": "whitelist", "allow_dns": true,
+  "allow_hosts": ["api.anthropic.com"], "rules": [], "next_id": 1 }
+```
+If `ipset`/`xt_set` is missing, the host-allowlist rule is skipped (logged) and only DNS/loopback/established are allowed — so whitelist mode without ipset will cut the agent off from its API; install `ipset` for this path.
 
 ## Token Budget Proxy
 

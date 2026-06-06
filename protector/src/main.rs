@@ -241,6 +241,27 @@ async fn async_main() -> anyhow::Result<()> {
                     if !pids.is_empty() { fw_task.track_pids(&pids); }
                 }
             });
+
+            // Egress allowlist resolver: re-resolve allow_hosts and refresh the
+            // ipset so default-deny stays compatible with rotating CDN IPs
+            // (e.g. api.anthropic.com). Blocking DNS + ipset → its own thread.
+            {
+                let fw_res  = std::sync::Arc::clone(&fw);
+                let cfg_res = Arc::clone(&fw_config);
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    let (active, hosts) = {
+                        let c = cfg_res.read().unwrap();
+                        let active = c.enabled
+                            && matches!(c.mode, firewall_config::FirewallMode::Whitelist);
+                        (active, c.allow_hosts.clone())
+                    };
+                    if active && !hosts.is_empty() {
+                        fw_res.refresh_allowlist(&hosts);
+                    }
+                });
+            }
+
             Some(fw)
         }
         Err(e) => {

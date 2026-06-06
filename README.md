@@ -30,7 +30,11 @@ provides a weaker, wrapper-based equivalent.
      error, so the agent keeps working with tokens, never the real secret.
 - **Credential relay** — real secrets are substituted back into outbound
   `curl`/`wget` **only** for hosts in `PROTECTOR_RELAY_ALLOWLIST` (anti-exfil).
-- **Network firewall** — L3/L4 egress/ingress control over the agent's cgroup.
+- **Network firewall / egress default-deny** — L3/L4 control over the agent's
+  cgroup. Whitelist mode drops all egress except DNS, loopback, established
+  replies, and a **hostname allowlist** (e.g. `api.anthropic.com`) whose rotating
+  CDN IPs are tracked in an ipset and refreshed every 30 s; all IPv6 egress is
+  dropped. So a leaked secret has nowhere to go.
 - **Token budget** — per-model input/output token caps for the Anthropic API.
 - **Observability** — live event stream (`protector inspect`), web dashboard,
   and CEF/syslog **SIEM** export.
